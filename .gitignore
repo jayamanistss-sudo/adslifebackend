@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.env
+.env.*
+uploads/
+config/firebase-service-account.json
+config/*.json
+*.pem
+*.key

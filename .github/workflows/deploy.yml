@@ -1,0 +1,53 @@
+name: Deploy Backend
+
+on:
+  push:
+    branches: [dev, test, prod]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set deploy config
+        id: cfg
+        run: |
+          if [ "${{ github.ref_name }}" = "prod" ]; then
+            echo "path=/var/www/adslife-backend"       >> $GITHUB_OUTPUT
+            echo "pm2=adslife-backend"                >> $GITHUB_OUTPUT
+            echo "env=PRODUCTION (adslife.in)"        >> $GITHUB_OUTPUT
+          elif [ "${{ github.ref_name }}" = "test" ]; then
+            echo "path=/var/www/adslife-backend-test"  >> $GITHUB_OUTPUT
+            echo "pm2=adslife-backend-test"           >> $GITHUB_OUTPUT
+            echo "env=TEST (test.adslife.in)"         >> $GITHUB_OUTPUT
+          else
+            echo "path=/var/www/adslife-backend-dev"   >> $GITHUB_OUTPUT
+            echo "pm2=adslife-backend-dev"            >> $GITHUB_OUTPUT
+            echo "env=DEV (dev.adslife.in)"           >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload src & package files
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.DEPLOY_SERVER_IP }}
+          username: ${{ secrets.DEPLOY_SERVER_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          source: "src,package.json,tsconfig.json,tsconfig.build.json,nest-cli.json"
+          target: "${{ steps.cfg.outputs.path }}"
+
+      - name: Build & Restart on Server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DEPLOY_SERVER_IP }}
+          username: ${{ secrets.DEPLOY_SERVER_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            cd ${{ steps.cfg.outputs.path }}
+            npm install --legacy-peer-deps
+            npm run build
+            pm2 restart ${{ steps.cfg.outputs.pm2 }} || pm2 start dist/main.js --name ${{ steps.cfg.outputs.pm2 }}
+            pm2 save
+
+      - name: Notify
+        run: echo "✅ Backend deployed to ${{ steps.cfg.outputs.env }} from branch ${{ github.ref_name }}"
