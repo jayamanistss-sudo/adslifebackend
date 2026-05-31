@@ -1,10 +1,7 @@
-import {
-  IsString, IsNotEmpty, IsOptional, IsUrl, MaxLength, Matches,
-} from 'class-validator';
-import { Transform } from 'class-transformer';
+import { IsString, IsNotEmpty, IsOptional, IsUrl, MaxLength, Matches, IsNumber } from 'class-validator';
+import { Transform, Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
-// Convert empty strings to undefined so @IsOptional() skips further validation
 const emptyToUndefined = () =>
   Transform(({ value }) => (typeof value === 'string' && value.trim() === '' ? undefined : value));
 
@@ -15,51 +12,75 @@ export class SubmitVendorApplicationDto {
   @MaxLength(200)
   business_name: string;
 
-  @ApiPropertyOptional({ example: 'Food & Dining' })
+  @ApiPropertyOptional()
   @IsOptional()
   @emptyToUndefined()
   @IsString()
   @MaxLength(100)
   category?: string;
 
-  @ApiPropertyOptional({ example: 'Chennai' })
+  @ApiPropertyOptional()
   @IsOptional()
   @emptyToUndefined()
   @IsString()
   @MaxLength(100)
   city?: string;
 
-  @ApiPropertyOptional({ example: '123, Anna Salai, Chennai' })
+  @ApiPropertyOptional()
   @IsOptional()
   @emptyToUndefined()
   @IsString()
   @MaxLength(300)
   address?: string;
 
-  @ApiPropertyOptional({ example: '+91 9876543210' })
+  @ApiPropertyOptional()
   @IsOptional()
   @emptyToUndefined()
   @IsString()
   @Matches(/^[+\d\s\-()]{7,20}$/, { message: 'Invalid phone number' })
   phone?: string;
 
-  @ApiPropertyOptional({ example: 'https://mybakery.com' })
+  @ApiPropertyOptional()
   @IsOptional()
   @emptyToUndefined()
-  @IsUrl({}, { message: 'website must be a valid URL (e.g. https://mybakery.com)' })
+  @IsUrl({}, { message: 'website must be a valid URL' })
   website?: string;
 
-  @ApiPropertyOptional({ example: '22AAAAA0000A1Z5' })
+  @ApiPropertyOptional()
   @IsOptional()
   @emptyToUndefined()
   @IsString()
   @MaxLength(20)
   gst_number?: string;
 
-  @ApiPropertyOptional({ example: 'We have been baking for 10 years.' })
+  @ApiPropertyOptional()
   @IsOptional()
   @emptyToUndefined()
   @IsString()
   @MaxLength(1000)
   description?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  lat?: number;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  lng?: number;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @emptyToUndefined()
+  @IsString()
+  logo_url?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  plan_id?: number;
 }

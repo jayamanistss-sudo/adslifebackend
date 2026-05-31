@@ -17,6 +17,8 @@ async function bootstrap() {
       process.env.FRONTEND_URL || 'http://localhost:5173',
       'https://adslife.in',
       'https://www.adslife.in',
+      'https://dev.adslife.in',
+      'https://test.adslife.in',
       'https://adslifebackend.stss.in',
       'http://localhost:5173',
       'http://localhost:3000',
