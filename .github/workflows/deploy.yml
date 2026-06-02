@@ -13,24 +13,19 @@ jobs:
       - name: Set deploy config
         id: cfg
         run: |
-          if [ "${{ github.ref_name }}" = "prod" ]; then
-            echo "path=/var/www/adslife-backend"        >> $GITHUB_OUTPUT
-            echo "pm2=adslife-backend"                 >> $GITHUB_OUTPUT
-            echo "db=adslife"                          >> $GITHUB_OUTPUT
-            echo "port=3001"                           >> $GITHUB_OUTPUT
-            echo "env=PRODUCTION → adslife.in"         >> $GITHUB_OUTPUT
-          elif [ "${{ github.ref_name }}" = "test" ]; then
-            echo "path=/var/www/adslife-backend-test"   >> $GITHUB_OUTPUT
-            echo "pm2=adslife-backend-test"            >> $GITHUB_OUTPUT
-            echo "db=adslife_test"                     >> $GITHUB_OUTPUT
-            echo "port=3003"                           >> $GITHUB_OUTPUT
-            echo "env=TEST → test.adslife.in"          >> $GITHUB_OUTPUT
+          BRANCH="${{ github.ref_name }}"
+          if [ "$BRANCH" = "prod" ]; then
+            echo "path=/var/www/adslife-backend" >> $GITHUB_OUTPUT
+            echo "pm2=adslife-backend" >> $GITHUB_OUTPUT
+            echo "env=PRODUCTION" >> $GITHUB_OUTPUT
+          elif [ "$BRANCH" = "test" ]; then
+            echo "path=/var/www/adslife-backend-test" >> $GITHUB_OUTPUT
+            echo "pm2=adslife-backend-test" >> $GITHUB_OUTPUT
+            echo "env=TEST" >> $GITHUB_OUTPUT
           else
-            echo "path=/var/www/adslife-backend-dev"   >> $GITHUB_OUTPUT
-            echo "pm2=adslife-backend-dev"             >> $GITHUB_OUTPUT
-            echo "db=adslife_dev"                      >> $GITHUB_OUTPUT
-            echo "port=3002"                           >> $GITHUB_OUTPUT
-            echo "env=DEV → dev.adslife.in"            >> $GITHUB_OUTPUT
+            echo "path=/var/www/adslife-backend-dev" >> $GITHUB_OUTPUT
+            echo "pm2=adslife-backend-dev" >> $GITHUB_OUTPUT
+            echo "env=DEV" >> $GITHUB_OUTPUT
           fi
 
       - name: Upload source files
@@ -40,25 +35,22 @@ jobs:
           username: ${{ secrets.DEPLOY_SERVER_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           source: "src,package.json,tsconfig.json,tsconfig.build.json,nest-cli.json"
-          target: "${{ steps.cfg.outputs.path }}"
+          target: ${{ steps.cfg.outputs.path }}
 
-      - name: Build & restart on server
+      - name: Build and restart on server
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.DEPLOY_SERVER_IP }}
           username: ${{ secrets.DEPLOY_SERVER_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           script: |
+            set -e
             cd ${{ steps.cfg.outputs.path }}
-            # Copy node_modules from prod if not present (saves install time)
-            [ ! -d node_modules ] && cp -r /var/www/adslife-backend/node_modules . 2>/dev/null || true
+            [ ! -d node_modules ] && cp -r /var/www/adslife-backend/node_modules . || true
             npm install --legacy-peer-deps --silent
             npm run build
-            pm2 restart ${{ steps.cfg.outputs.pm2 }} \
-              || pm2 start dist/main.js \
-                 --name ${{ steps.cfg.outputs.pm2 }} \
-                 --env production
+            pm2 restart ${{ steps.cfg.outputs.pm2 }} || pm2 start dist/main.js --name ${{ steps.cfg.outputs.pm2 }}
             pm2 save
 
-      - name: Summary
-        run: echo "✅ Backend deployed to ${{ steps.cfg.outputs.env }} (DB: ${{ steps.cfg.outputs.db }}, Port: ${{ steps.cfg.outputs.port }})"
+      - name: Done
+        run: echo "Backend deployed to ${{ steps.cfg.outputs.env }} from branch ${{ github.ref_name }}"
