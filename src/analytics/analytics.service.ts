@@ -1,14 +1,18 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
+
 
 @Injectable()
 export class AnalyticsService {
   constructor(@InjectDataSource() private db: DataSource) {}
 
-  async roi(offerId: number, days = 30) {
+  async roi(offerId: number, days = 30, vendorId?: number, role?: string) {
     const [offer] = await this.db.query('SELECT * FROM offers WHERE id = ?', [offerId]);
     if (!offer) throw new NotFoundException('Offer not found');
+    if (role !== 'admin' && vendorId !== undefined && offer.vendor_id !== vendorId) {
+      throw new ForbiddenException('Access denied to this offer');
+    }
 
     const [c] = await this.db.query(
       'SELECT SUM(impressions) as imp, SUM(clicks) as clk, SUM(saves) as sv, SUM(redemptions) as red FROM vendor_daily_stats WHERE vendor_id = ? AND stat_date >= DATE_SUB(CURDATE(), INTERVAL ? DAY)',

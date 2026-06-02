@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 
@@ -34,6 +34,7 @@ export class SupportService {
   async reply(ticketId: number, userId: number, message: string, role: string) {
     const [ticket] = await this.db.query('SELECT * FROM support_tickets WHERE id = ?', [ticketId]);
     if (!ticket) throw new NotFoundException('Ticket not found');
+    if (role !== 'admin' && ticket.user_id !== userId) throw new ForbiddenException('Access denied');
 
     await this.db.query(
       'INSERT INTO support_replies (ticket_id, user_id, message, is_staff) VALUES (?, ?, ?, ?)',

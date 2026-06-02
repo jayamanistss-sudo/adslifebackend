@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { PushService } from '../services/push.service';
@@ -6,8 +6,8 @@ import { PushService } from '../services/push.service';
 @Injectable()
 export class AdminService {
   constructor(
-    @InjectDataSource() private db: DataSource,
-    private push: PushService,
+    @InjectDataSource() private readonly db: DataSource,
+    private readonly push: PushService,
   ) {}
 
   async getStats() {
@@ -41,7 +41,9 @@ export class AdminService {
     for (const r of roles) roleBreakdown[r.role] = +r.cnt;
 
     const tm = +usersThisMonth.cnt, lm = +usersLastMonth.cnt;
-    const growth = lm > 0 ? Math.round(((tm - lm) / lm) * 1000) / 10 : tm > 0 ? 100 : 0;
+    let growth = 0;
+    if (lm > 0) growth = Math.round(((tm - lm) / lm) * 1000) / 10;
+    else if (tm > 0) growth = 100;
 
     const [dailyUsers, recentUsers, recentVendors] = await Promise.all([
       this.db.query('SELECT DATE(created_at) AS d, COUNT(*) AS cnt FROM users WHERE created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY) GROUP BY DATE(created_at) ORDER BY d ASC'),
@@ -68,7 +70,7 @@ export class AdminService {
     if (status === 'active') conds.push('u.is_active = 1');
     else if (status === 'banned') conds.push('u.is_active = 0');
     const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
-    const [[{ total }]] = await Promise.all([this.db.query(`SELECT COUNT(*) as total FROM users u ${where}`, p)]);
+    const [{ total }] = await this.db.query(`SELECT COUNT(*) as total FROM users u ${where}`, p);
     const users = await this.db.query(
       `SELECT u.id, u.name, u.email, u.role, u.city, u.is_active, u.created_at,
               COALESCE((SELECT COUNT(*) FROM user_interactions WHERE user_id=u.id),0) as interactions,
@@ -86,9 +88,7 @@ export class AdminService {
     if (plan)   { conds.push('v.subscription_plan = ?'); p.push(plan); }
     if (search) { conds.push('(v.business_name LIKE ? OR u.email LIKE ? OR v.city LIKE ?)'); p.push(`%${search}%`, `%${search}%`, `%${search}%`); }
     const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
-    const [[{ total }]] = await Promise.all([
-      this.db.query(`SELECT COUNT(*) as total FROM vendors v JOIN users u ON v.user_id = u.id ${where}`, p),
-    ]);
+    const [{ total }] = await this.db.query(`SELECT COUNT(*) as total FROM vendors v JOIN users u ON v.user_id = u.id ${where}`, p);
     const vendors = await this.db.query(
       `SELECT v.*, u.name, u.email, u.is_active as user_active,
               (SELECT COUNT(*) FROM offers WHERE vendor_id=v.id) as total_offers,
@@ -110,29 +110,28 @@ export class AdminService {
     const [app] = await this.db.query('SELECT * FROM vendor_applications WHERE id = ?', [appId]);
     if (!app) throw new NotFoundException('Application not found');
 
-    // Update the application status
-    await this.db.query(
-      'UPDATE vendor_applications SET status = ? WHERE id = ?',
-      [status, appId],
-    );
+    await this.db.transaction(async (manager) => {
+      await manager.query('UPDATE vendor_applications SET status = ? WHERE id = ?', [status, appId]);
+
+      if (status === 'approved') {
+        const [existing] = await manager.query('SELECT id FROM vendors WHERE user_id = ?', [app.user_id]);
+        if (existing) {
+          await manager.query(
+            'UPDATE vendors SET status = "approved", review_note = ?, business_name = ?, category = ?, city = ?, address = ?, phone = ?, website = ?, gst_number = ?, description = ? WHERE user_id = ?',
+            [note || null, app.business_name, app.category, app.city, app.address, app.phone, app.website, app.gst_number, app.description, app.user_id],
+          );
+        } else {
+          await manager.query(
+            `INSERT INTO vendors (user_id, business_name, category, city, address, phone, website, gst_number, description, status, review_note, subscription_plan)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'approved', ?, 'free')`,
+            [app.user_id, app.business_name, app.category, app.city, app.address, app.phone, app.website, app.gst_number, app.description, note || null],
+          );
+        }
+        await manager.query("UPDATE users SET role = 'vendor' WHERE id = ?", [app.user_id]);
+      }
+    });
 
     if (status === 'approved') {
-      // Upsert into vendors table
-      const [existing] = await this.db.query('SELECT id FROM vendors WHERE user_id = ?', [app.user_id]);
-      if (existing) {
-        await this.db.query(
-          'UPDATE vendors SET status = "approved", review_note = ?, business_name = ?, category = ?, city = ?, address = ?, phone = ?, website = ?, gst_number = ?, description = ? WHERE user_id = ?',
-          [note || null, app.business_name, app.category, app.city, app.address, app.phone, app.website, app.gst_number, app.description, app.user_id],
-        );
-      } else {
-        await this.db.query(
-          `INSERT INTO vendors (user_id, business_name, category, city, address, phone, website, gst_number, description, status, review_note, subscription_plan)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'approved', ?, 'free')`,
-          [app.user_id, app.business_name, app.category, app.city, app.address, app.phone, app.website, app.gst_number, app.description, note || null],
-        );
-      }
-      // Upgrade user role to vendor
-      await this.db.query("UPDATE users SET role = 'vendor' WHERE id = ?", [app.user_id]);
       await this.push.send(app.user_id, 'Vendor Approved!', 'Your vendor account has been approved.', { type: 'vendor_approved' });
     }
 
@@ -148,9 +147,7 @@ export class AdminService {
     if (category) { conds.push('o.category = ?'); p.push(category); }
     if (search)   { conds.push('(o.title LIKE ? OR v.business_name LIKE ?)'); p.push(`%${search}%`, `%${search}%`); }
     const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
-    const [[{ total }]] = await Promise.all([
-      this.db.query(`SELECT COUNT(*) as total FROM offers o JOIN vendors v ON o.vendor_id=v.id JOIN users u ON v.user_id=u.id ${where}`, p),
-    ]);
+    const [{ total }] = await this.db.query(`SELECT COUNT(*) as total FROM offers o JOIN vendors v ON o.vendor_id=v.id JOIN users u ON v.user_id=u.id ${where}`, p);
     const offers = await this.db.query(
       `SELECT o.*, v.business_name, u.email as vendor_email
        FROM offers o
@@ -203,9 +200,12 @@ export class AdminService {
       case 'ban':    await this.db.query('UPDATE users SET is_active = 0 WHERE id = ?', [userId]); break;
       case 'unban':  await this.db.query('UPDATE users SET is_active = 1 WHERE id = ?', [userId]); break;
       case 'delete': await this.db.query('DELETE FROM users WHERE id = ?', [userId]); break;
-      case 'update_role':
-        if (extra.role) await this.db.query('UPDATE users SET role = ? WHERE id = ?', [extra.role, userId]);
+      case 'update_role': {
+        const allowedRoles = ['user', 'vendor', 'admin'];
+        if (!allowedRoles.includes(extra.role)) throw new BadRequestException('Invalid role');
+        await this.db.query('UPDATE users SET role = ? WHERE id = ?', [extra.role, userId]);
         break;
+      }
       default: throw new Error('Unknown action');
     }
     return { updated: true };
@@ -229,9 +229,12 @@ export class AdminService {
       case 'approve':  await this.db.query('UPDATE vendors SET status = "approved" WHERE id = ?', [vendorId]); break;
       case 'reject':   await this.db.query('UPDATE vendors SET status = "rejected" WHERE id = ?', [vendorId]); break;
       case 'suspend':  await this.db.query('UPDATE vendors SET status = "suspended" WHERE id = ?', [vendorId]); break;
-      case 'update_plan':
-        if (extra.plan) await this.db.query('UPDATE vendors SET subscription_plan = ? WHERE id = ?', [extra.plan, vendorId]);
+      case 'update_plan': {
+        const [plan] = await this.db.query('SELECT slug FROM subscription_plans WHERE slug = ?', [extra.plan]);
+        if (!plan) throw new BadRequestException('Invalid plan');
+        await this.db.query('UPDATE vendors SET subscription_plan = ? WHERE id = ?', [extra.plan, vendorId]);
         break;
+      }
       default: throw new Error('Unknown action');
     }
     return { updated: true };

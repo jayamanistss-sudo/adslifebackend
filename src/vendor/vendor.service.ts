@@ -130,7 +130,7 @@ export class VendorService {
 
   async getProfile(vendorId: number) {
     const [vendor] = await this.db.query(
-      `SELECT v.*, u.name, u.email, u.avatar_url as user_avatar
+      `SELECT v.*, u.name, u.avatar_url as user_avatar
        FROM vendors v JOIN users u ON v.user_id = u.id
        WHERE v.id = ?`,
       [vendorId],

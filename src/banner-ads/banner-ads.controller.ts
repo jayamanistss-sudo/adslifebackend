@@ -47,14 +47,20 @@ export class BannerAdsController {
   @Roles('admin')
   @Post(':id/review')
   async review(@Param('id', ParseIntPipe) id: number, @Body() dto: ReviewBannerAdDto) {
-    const expiresClause = dto.status === 'approved'
-      ? `DATE_ADD(NOW(), INTERVAL (SELECT duration_days FROM banner_ad_requests WHERE id = ${id}) DAY)`
-      : 'expires_at';
-
-    await this.db.query(
-      `UPDATE banner_ad_requests SET status = ?, review_note = ?, expires_at = ${expiresClause} WHERE id = ?`,
-      [dto.status, dto.note ?? null, id],
-    );
+    if (dto.status === 'approved') {
+      await this.db.query(
+        `UPDATE banner_ad_requests
+         SET status = ?, review_note = ?,
+             expires_at = DATE_ADD(NOW(), INTERVAL (SELECT duration_days FROM banner_ad_requests WHERE id = ?) DAY)
+         WHERE id = ?`,
+        [dto.status, dto.note ?? null, id, id],
+      );
+    } else {
+      await this.db.query(
+        'UPDATE banner_ad_requests SET status = ?, review_note = ? WHERE id = ?',
+        [dto.status, dto.note ?? null, id],
+      );
+    }
     return { success: true, data: { updated: true } };
   }
 }

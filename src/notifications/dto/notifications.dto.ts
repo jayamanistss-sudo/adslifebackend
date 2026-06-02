@@ -1,6 +1,6 @@
 import {
   IsString, IsOptional, IsIn, IsInt,
-  IsNotEmpty, MaxLength, Min,
+  IsNotEmpty, MaxLength, Min, IsArray,
 } from 'class-validator';
 import { Type, Transform } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
@@ -43,8 +43,10 @@ export class NotificationsListQueryDto {
 }
 
 export class TriggerNotificationDto {
-  @ApiProperty({ description: 'Single user ID or array of user IDs' })
-  user_ids: number | number[];
+  @ApiProperty({ description: 'Array of user IDs' })
+  @IsArray()
+  @IsInt({ each: true })
+  user_ids: number[];
 
   @ApiProperty({ example: 'You have a new offer!' })
   @IsString()

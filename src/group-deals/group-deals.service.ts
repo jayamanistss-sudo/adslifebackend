@@ -4,7 +4,7 @@ import { DataSource } from 'typeorm';
 
 @Injectable()
 export class GroupDealsService {
-  constructor(@InjectDataSource() private db: DataSource) {}
+  constructor(@InjectDataSource() private readonly db: DataSource) {}
 
   async getActive(lat: number, lng: number) {
     return this.db.query(
@@ -27,28 +27,31 @@ export class GroupDealsService {
     );
     if (!deal) throw new NotFoundException('Group deal not found or expired');
 
-    const [existing] = await this.db.query(
-      'SELECT id FROM group_deal_members WHERE deal_id = ? AND user_id = ?',
-      [dealId, userId],
-    );
-    if (existing) throw new BadRequestException('Already joined this deal');
+    const result = await this.db.transaction(async (manager) => {
+      const [existing] = await manager.query(
+        'SELECT id FROM group_deal_members WHERE deal_id = ? AND user_id = ? FOR UPDATE',
+        [dealId, userId],
+      );
+      if (existing) throw new BadRequestException('Already joined this deal');
 
-    await this.db.query(
-      'INSERT INTO group_deal_members (deal_id, user_id) VALUES (?, ?)',
-      [dealId, userId],
-    );
+      await manager.query(
+        'INSERT INTO group_deal_members (deal_id, user_id) VALUES (?, ?)',
+        [dealId, userId],
+      );
 
-    const [[{ cnt }]] = [await this.db.query(
-      'SELECT COUNT(*) as cnt FROM group_deal_members WHERE deal_id = ?',
-      [dealId],
-    )];
-    const currentMembers = +cnt;
+      const [{ cnt }] = await manager.query(
+        'SELECT COUNT(*) as cnt FROM group_deal_members WHERE deal_id = ?',
+        [dealId],
+      );
+      const currentMembers = +cnt;
 
-    if (currentMembers >= deal.min_members) {
-      await this.db.query('UPDATE group_deals SET status = "fulfilled" WHERE id = ?', [dealId]);
-    }
+      if (currentMembers >= deal.min_members) {
+        await manager.query('UPDATE group_deals SET status = "fulfilled" WHERE id = ?', [dealId]);
+      }
+      return currentMembers;
+    });
 
-    return { joined: true, current_members: currentMembers, min_members: deal.min_members, fulfilled: currentMembers >= deal.min_members };
+    return { joined: true, current_members: result, min_members: deal.min_members, fulfilled: result >= deal.min_members };
   }
 
   async status(dealId: number) {

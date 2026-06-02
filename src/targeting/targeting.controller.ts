@@ -16,7 +16,7 @@ export class TargetingController {
   @Public()
   @Get('resolve-area')
   async resolveArea(@Query() query: ResolveAreaQueryDto) {
-    if (!query.lat || !query.lng) return { success: false, error: 'lat and lng required' };
+    if (query.lat == null || query.lng == null) return { success: false, error: 'lat and lng required' };
     try {
       const { data } = await axios.get(
         `https://nominatim.openstreetmap.org/reverse?lat=${query.lat}&lon=${query.lng}&format=json`,

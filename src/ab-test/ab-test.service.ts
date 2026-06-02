@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 
@@ -18,9 +18,10 @@ export class AbTestService {
     return { id: result.insertId };
   }
 
-  async results(testId: number) {
+  async results(testId: number, vendorId: number, role: string) {
     const [test] = await this.db.query('SELECT * FROM ab_tests WHERE id = ?', [testId]);
     if (!test) throw new NotFoundException('A/B test not found');
+    if (role !== 'admin' && test.vendor_id !== vendorId) throw new ForbiddenException('Access denied');
 
     const statsFor = async (offerId: number) => {
       const [[views]] = [await this.db.query(
@@ -48,9 +49,10 @@ export class AbTestService {
     return { test, variant_a: statsA, variant_b: statsB, leading: winner };
   }
 
-  async conclude(testId: number, winnerVariant: 'A' | 'B') {
+  async conclude(testId: number, winnerVariant: 'A' | 'B', vendorId: number, role: string) {
     const [test] = await this.db.query('SELECT * FROM ab_tests WHERE id = ?', [testId]);
     if (!test) throw new NotFoundException('A/B test not found');
+    if (role !== 'admin' && test.vendor_id !== vendorId) throw new ForbiddenException('Access denied');
     if (test.status !== 'running') throw new BadRequestException('Test is not running');
 
     const winnerOfferId = winnerVariant === 'A' ? test.offer_id_a : test.offer_id_b;

@@ -7,7 +7,6 @@ import { AdminService } from './admin.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
-import { Public } from '../common/decorators/public.decorator';
 import {
   AdminListQueryDto, AdminVendorQueryDto, AdminOffersQueryDto,
   ReviewVendorDto, BroadcastDto, SiteSettingsDto,
@@ -72,7 +71,6 @@ export class AdminController {
     return { success: true, data: result };
   }
 
-  @Public()
   @Get('site-settings')
   async getSiteSettings() {
     const data = await this.adminService.getSiteSettings();

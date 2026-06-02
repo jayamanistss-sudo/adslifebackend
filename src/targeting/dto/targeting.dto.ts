@@ -1,20 +1,26 @@
 import {
   IsArray, IsOptional, IsNumber, IsString, Min, Max,
-  ArrayMaxSize, IsLatitude, IsLongitude,
+  ArrayMaxSize,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
 export class ResolveAreaQueryDto {
-  @ApiPropertyOptional({ example: '13.0827' })
+  @ApiPropertyOptional({ example: 13.0827 })
   @IsOptional()
-  @IsString()
-  lat?: string;
+  @Type(() => Number)
+  @IsNumber()
+  @Min(-90)
+  @Max(90)
+  lat?: number;
 
-  @ApiPropertyOptional({ example: '80.2707' })
+  @ApiPropertyOptional({ example: 80.2707 })
   @IsOptional()
-  @IsString()
-  lng?: string;
+  @Type(() => Number)
+  @IsNumber()
+  @Min(-180)
+  @Max(180)
+  lng?: number;
 }
 
 export class SetTargetingDto {
