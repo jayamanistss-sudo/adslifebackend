@@ -28,14 +28,16 @@ export class AbTestController {
   }
 
   @Get(':id/results')
-  async results(@Param('id', ParseIntPipe) id: number) {
-    const data = await this.abTestService.results(id);
+  async results(@CurrentUser() user: any, @Param('id', ParseIntPipe) id: number) {
+    const [vendor] = await this.db.query('SELECT id FROM vendors WHERE user_id = ?', [user.user_id]);
+    const data = await this.abTestService.results(id, vendor?.id ?? 0, user.role);
     return { success: true, data };
   }
 
   @Post(':id/conclude')
-  async conclude(@Param('id', ParseIntPipe) id: number, @Body() dto: ConcludeAbTestDto) {
-    const data = await this.abTestService.conclude(id, dto.winner);
+  async conclude(@CurrentUser() user: any, @Param('id', ParseIntPipe) id: number, @Body() dto: ConcludeAbTestDto) {
+    const [vendor] = await this.db.query('SELECT id FROM vendors WHERE user_id = ?', [user.user_id]);
+    const data = await this.abTestService.conclude(id, dto.winner, vendor?.id ?? 0, user.role);
     return { success: true, data };
   }
 }

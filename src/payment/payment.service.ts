@@ -113,13 +113,14 @@ export class PaymentService {
   }
 
   async handleWebhook(rawBody: string, timestamp: string, signature: string) {
-    if (timestamp && signature && this.webhookSecret) {
-      const expected = Buffer.from(
-        crypto.createHmac('sha256', this.webhookSecret).update(timestamp + rawBody).digest(),
-      ).toString('base64');
-      if (!crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signature))) {
-        throw new BadRequestException('Invalid signature');
-      }
+    if (!timestamp || !signature) throw new BadRequestException('Missing webhook signature headers');
+    if (!this.webhookSecret) throw new BadRequestException('Webhook secret not configured');
+
+    const expected = Buffer.from(
+      crypto.createHmac('sha256', this.webhookSecret).update(timestamp + rawBody).digest(),
+    ).toString('base64');
+    if (!crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signature))) {
+      throw new BadRequestException('Invalid signature');
     }
 
     const event = JSON.parse(rawBody);

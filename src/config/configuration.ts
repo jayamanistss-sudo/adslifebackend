@@ -13,7 +13,13 @@ export default () => ({
   },
 
   jwt: {
-    secret: process.env.JWT_SECRET || 'adslife_jwt_secret_change_in_production',
+    secret: (() => {
+      const s = process.env.JWT_SECRET;
+      if (!s || s === 'adslife_jwt_secret_change_in_production') {
+        throw new Error('JWT_SECRET env var is not set or is using the insecure default. Set a strong secret before starting.');
+      }
+      return s;
+    })(),
     ttl: parseInt(process.env.JWT_TTL || '86400', 10),
     issuer: 'adslife.in',
     audience: 'adslife_users',

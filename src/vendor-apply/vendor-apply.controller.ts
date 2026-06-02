@@ -25,8 +25,8 @@ export class VendorApplyController {
 
     const result = await this.db.query(
       `INSERT INTO vendor_applications
-         (user_id, business_name, category, city, address, phone, website, gst_number, description, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
+         (user_id, business_name, category, city, address, phone, website, gst_number, description, lat, lng, logo_url, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
       [
         user.user_id,
         dto.business_name,
@@ -37,6 +37,9 @@ export class VendorApplyController {
         dto.website ?? null,
         dto.gst_number ?? null,
         dto.description ?? null,
+        dto.lat ?? null,
+        dto.lng ?? null,
+        dto.logo_url ?? null,
       ],
     );
     return {

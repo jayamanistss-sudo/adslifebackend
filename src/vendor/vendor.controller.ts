@@ -9,6 +9,7 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Public } from '../common/decorators/public.decorator';
+import { UpdateVendorProfileDto } from './dto/vendor.dto';
 
 @ApiTags('vendor')
 @ApiBearerAuth()
@@ -40,7 +41,7 @@ export class VendorController {
 
   @Roles('vendor', 'admin')
   @Put('profile')
-  async updateProfile(@CurrentUser() user: any, @Body() dto: Record<string, any>) {
+  async updateProfile(@CurrentUser() user: any, @Body() dto: UpdateVendorProfileDto) {
     const data = await this.vendorService.updateProfile(user.user_id, dto);
     return { success: true, data };
   }

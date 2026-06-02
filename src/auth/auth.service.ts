@@ -3,7 +3,6 @@ import {
   BadRequestException,
   UnauthorizedException,
   ConflictException,
-  ForbiddenException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
@@ -19,10 +18,10 @@ import { ReferralService } from '../referral/referral.service';
 @Injectable()
 export class AuthService {
   constructor(
-    @InjectDataSource() private db: DataSource,
-    private jwt: JwtService,
-    private config: ConfigService,
-    private referral: ReferralService,
+    @InjectDataSource() private readonly db: DataSource,
+    private readonly jwt: JwtService,
+    private readonly config: ConfigService,
+    private readonly referral: ReferralService,
   ) {}
 
   async login(dto: LoginDto) {
@@ -30,7 +29,7 @@ export class AuthService {
       'SELECT id, name, email, password_hash, role, city, lat, lng, avatar_url FROM users WHERE email = ? AND is_active = 1',
       [dto.email.trim()],
     );
-    if (!user || !user.password_hash) {
+    if (!user?.password_hash) {
       throw new UnauthorizedException('Invalid credentials');
     }
     if (!(await bcrypt.compare(dto.password, user.password_hash))) {
@@ -56,26 +55,23 @@ export class AuthService {
     if (existing) throw new ConflictException('Email already registered');
 
     const hash = await bcrypt.hash(dto.password, 10);
-    const role = ['user', 'vendor'].includes(dto.role || '') ? dto.role! : 'user';
+    const role = 'user';
 
-    const result = await this.db.query(
-      'INSERT INTO users (name, email, phone, password_hash, city, role) VALUES (?, ?, ?, ?, ?, ?)',
-      [dto.name.trim(), dto.email.trim(), dto.phone?.trim() || null, hash, dto.city?.trim() || null, role],
-    );
-    const userId = result.insertId;
+    const userId: number = await this.db.transaction(async (manager) => {
+      const result = await manager.query(
+        'INSERT INTO users (name, email, phone, password_hash, city, role) VALUES (?, ?, ?, ?, ?, ?)',
+        [dto.name.trim(), dto.email.trim(), dto.phone?.trim() || null, hash, dto.city?.trim() || null, role],
+      );
+      const newId: number = result.insertId;
+      await manager.query(
+        'INSERT IGNORE INTO user_preferences (user_id, preferred_categories, preferred_vendors) VALUES (?, ?, ?)',
+        [newId, '[]', '[]'],
+      );
+      return newId;
+    });
 
-    await this.db.query(
-      'INSERT IGNORE INTO user_preferences (user_id, preferred_categories, preferred_vendors) VALUES (?, ?, ?)',
-      [userId, '[]', '[]'],
-    );
-
-    // Generate referral code for new user
     await this.referral.ensureCode(userId);
-
-    // Award coins if referred
-    if (dto.ref) {
-      await this.referral.applyReferral(userId, dto.ref.toUpperCase());
-    }
+    if (dto.ref) await this.referral.applyReferral(userId, dto.ref.toUpperCase());
 
     const token = this.generateToken(userId, role);
     return {
@@ -86,7 +82,8 @@ export class AuthService {
 
   async googleAuth(accessToken: string) {
     const { data: profile } = await axios.get(
-      `https://www.googleapis.com/oauth2/v3/userinfo?access_token=${accessToken}`,
+      'https://www.googleapis.com/oauth2/v3/userinfo',
+      { headers: { Authorization: `Bearer ${accessToken}` } },
     );
 
     if (!profile?.email) throw new BadRequestException('Invalid Google token');

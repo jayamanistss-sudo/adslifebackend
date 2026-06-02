@@ -5,18 +5,24 @@ import * as nodemailer from 'nodemailer';
 
 @Injectable()
 export class InviteService {
+  private readonly transporter = process.env.SMTP_USER && process.env.SMTP_PASS
+    ? nodemailer.createTransport({
+        host: process.env.SMTP_HOST || 'smtp.gmail.com',
+        port: Number(process.env.SMTP_PORT) || 587,
+        secure: false,
+        auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+      })
+    : null;
+
   constructor(@InjectDataSource() private readonly db: DataSource) {}
 
-  private getTransporter() {
-    return nodemailer.createTransport({
-      host: process.env.SMTP_HOST || 'smtp.gmail.com',
-      port: Number(process.env.SMTP_PORT) || 587,
-      secure: false,
-      auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS,
-      },
-    });
+  private escapeHtml(text: string): string {
+    return text
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#x27;');
   }
 
   async sendInviteEmail(senderId: number, toEmail: string, offerId?: number, customMessage?: string) {
@@ -51,7 +57,7 @@ export class InviteService {
         <div style="background:#fff;padding:24px;border-radius:0 0 12px 12px;border:1px solid #eee;">
           <p style="font-size:16px;color:#333;"><strong>${sender.name}</strong> invited you to join AdsLife — discover the best local offers near you and earn coins every time you explore!</p>
           ${offerSection}
-          ${customMessage ? `<p style="color:#555;font-style:italic;">"${customMessage}"</p>` : ''}
+          ${customMessage ? `<p style="color:#555;font-style:italic;">"${this.escapeHtml(customMessage)}"</p>` : ''}
           <p style="color:#888;font-size:13px;">Join using this referral link and both of you get bonus coins:</p>
           <a href="${refLink}" style="display:block;text-align:center;background:#FF6200;color:#fff;padding:14px;border-radius:10px;text-decoration:none;font-size:16px;font-weight:600;margin:16px 0;">
             Join AdsLife — Get 20 Coins Free 🎉
@@ -60,14 +66,13 @@ export class InviteService {
         </div>
       </div>`;
 
-    if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
-      // SMTP not configured — log and return gracefully
+    if (!this.transporter) {
       console.log(`[Invite] Would send to ${toEmail} from ${sender.name} (SMTP not configured)`);
       return;
     }
 
     try {
-      await this.getTransporter().sendMail({
+      await this.transporter.sendMail({
         from: `"AdsLife" <${process.env.SMTP_USER}>`,
         to: toEmail,
         subject: `${sender.name} invited you to AdsLife 🎉`,

@@ -9,7 +9,9 @@ import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
 
-  // Serve uploaded vendor images as static files
+  // Serve landing page at root
+  app.useStaticAssets(join(process.cwd(), 'public'));
+  // Serve uploaded vendor images
   app.useStaticAssets(join(process.cwd(), 'uploads'), { prefix: '/uploads' });
 
   app.enableCors({

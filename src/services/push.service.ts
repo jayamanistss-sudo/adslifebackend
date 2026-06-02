@@ -69,10 +69,11 @@ export class PushService {
     for (const t of tokens) tokenMap[t.token] = t.user_id;
 
     const url = `https://fcm.googleapis.com/v1/projects/${sa.project_id}/messages:send`;
+    const CONCURRENCY = 20;
     let sent = 0;
     const stale: string[] = [];
 
-    for (const { token } of tokens) {
+    const sendOne = async (token: string) => {
       try {
         const resp = await axios.post(url, {
           message: {
@@ -100,6 +101,11 @@ export class PushService {
           stale.push(token);
         }
       }
+    };
+
+    // Process in parallel batches capped at CONCURRENCY
+    for (let i = 0; i < tokens.length; i += CONCURRENCY) {
+      await Promise.all(tokens.slice(i, i + CONCURRENCY).map(({ token }: { token: string }) => sendOne(token)));
     }
 
     if (stale.length) {
