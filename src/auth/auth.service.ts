@@ -288,6 +288,7 @@ export class AuthService {
         algorithm: 'HS256',
         expiresIn: '1h',
         issuer: powersyncUrl,
+        audience: powersyncUrl,
         keyid: kid,
       },
     );
