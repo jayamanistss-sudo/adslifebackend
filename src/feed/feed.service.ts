@@ -22,8 +22,9 @@ export class FeedService {
     const offset = (page - 1) * limit;
 
     const [prefs] = await this.db.query('SELECT * FROM user_preferences WHERE user_id = ?', [userId]);
-    const preferredCategories: string[] = JSON.parse(prefs?.preferred_categories ?? '[]');
-    const preferredVendors: number[] = JSON.parse(prefs?.preferred_vendors ?? '[]');
+    const safeJson = (v: any): any[] => { try { const p = JSON.parse(v ?? '[]'); return Array.isArray(p) ? p : []; } catch { return []; } };
+    const preferredCategories: string[] = safeJson(prefs?.preferred_categories);
+    const preferredVendors: number[] = safeJson(prefs?.preferred_vendors);
 
     const catList = preferredCategories.length
       ? preferredCategories.map(() => '?').join(',')
@@ -251,12 +252,13 @@ export class FeedService {
     return { recorded: true, vendor_id: offer.vendor_id };
   }
 
-  private async updatePreferences(userId: number, category: string, offerId: number, action: string) {
+  private async updatePreferences(userId: number, category: string, _offerId: number, action: string) {
     const weight = action === 'save' || action === 'redeem' ? 2 : action === 'click' ? 1 : action === 'skip' ? -1 : 0;
     if (weight === 0) return;
 
+    const safeJson = (v: any): any[] => { try { const p = JSON.parse(v ?? '[]'); return Array.isArray(p) ? p : []; } catch { return []; } };
     const [row] = await this.db.query('SELECT * FROM user_preferences WHERE user_id = ?', [userId]);
-    let categories: string[] = JSON.parse(row?.preferred_categories ?? '[]');
+    let categories: string[] = safeJson(row?.preferred_categories);
 
     if (weight > 0 && category && !categories.includes(category)) {
       categories.push(category);
