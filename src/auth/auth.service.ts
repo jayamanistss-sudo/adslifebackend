@@ -11,11 +11,13 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
+import * as jwt from 'jsonwebtoken';
 import axios from 'axios';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { BecomeVendorDto } from './dto/google-auth.dto';
 import { ReferralService } from '../referral/referral.service';
+import { MonitoringService } from '../monitoring/monitoring.service';
 
 @Injectable()
 export class AuthService {
@@ -24,27 +26,48 @@ export class AuthService {
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
     private readonly referral: ReferralService,
+    private readonly monitoring: MonitoringService,
   ) {}
 
-  async login(dto: LoginDto) {
+  async login(dto: LoginDto, ctx?: { ip: string; ua: string; requestId?: string }) {
     const [user] = await this.db.query(
       'SELECT id, name, email, password_hash, role, city, lat, lng, avatar_url FROM users WHERE email = ? AND is_active = 1',
       [dto.email.trim()],
     );
-    if (!user?.password_hash) throw new UnauthorizedException('Invalid credentials');
+    if (!user?.password_hash) {
+      setImmediate(() => this.monitoring.logAuth({
+        requestId: ctx?.requestId, email: dto.email, action: 'login_failure',
+        ipAddress: ctx?.ip ?? '0.0.0.0', userAgent: ctx?.ua,
+        failureReason: 'User not found or inactive',
+      }).catch(() => {}));
+      throw new UnauthorizedException('Invalid credentials');
+    }
     if (!(await bcrypt.compare(dto.password, user.password_hash))) {
+      setImmediate(() => {
+        this.monitoring.logAuth({
+          requestId: ctx?.requestId, userId: user.id, email: user.email,
+          role: user.role, action: 'login_failure',
+          ipAddress: ctx?.ip ?? '0.0.0.0', userAgent: ctx?.ua,
+          failureReason: 'Wrong password',
+        }).catch(() => {});
+      });
       throw new UnauthorizedException('Invalid credentials');
     }
     await this.db.query(
       'UPDATE users SET last_login = CURDATE(), login_count = login_count + 1 WHERE id = ?',
       [user.id],
     );
+    setImmediate(() => this.monitoring.logAuth({
+      requestId: ctx?.requestId, userId: user.id, email: user.email,
+      role: user.role, action: 'login_success',
+      ipAddress: ctx?.ip ?? '0.0.0.0', userAgent: ctx?.ua,
+    }).catch(() => {}));
     const token = this.generateToken(user.id, user.role);
     delete user.password_hash;
     return { user, token };
   }
 
-  async register(dto: RegisterDto) {
+  async register(dto: RegisterDto, ctx?: { ip: string; ua: string; requestId?: string }) {
     if (!dto.name || !dto.email || !dto.password) {
       throw new BadRequestException('Name, email and password are required');
     }
@@ -69,6 +92,11 @@ export class AuthService {
 
     await this.referral.ensureCode(userId);
     if (dto.ref) await this.referral.applyReferral(userId, dto.ref.toUpperCase());
+
+    setImmediate(() => this.monitoring.logAuth({
+      requestId: ctx?.requestId, userId, email: dto.email, role,
+      action: 'register', ipAddress: ctx?.ip ?? '0.0.0.0', userAgent: ctx?.ua,
+    }).catch(() => {}));
 
     const token = this.generateToken(userId, role);
     return { user: { id: userId, name: dto.name, email: dto.email, role }, token };
@@ -225,8 +253,13 @@ export class AuthService {
     return { message: 'Password changed successfully. Please log in again.' };
   }
 
-  async logout(userId: number) {
+  async logout(userId: number, ctx?: { ip: string; ua: string; requestId?: string }) {
+    const [user] = await this.db.query('SELECT email, role FROM users WHERE id = ?', [userId]);
     await this.db.query('UPDATE users SET token_invalidated_at = ? WHERE id = ?', [Date.now(), userId]);
+    setImmediate(() => this.monitoring.logAuth({
+      requestId: ctx?.requestId, userId, email: user?.email, role: user?.role,
+      action: 'logout', ipAddress: ctx?.ip ?? '0.0.0.0', userAgent: ctx?.ua,
+    }).catch(() => {}));
     return { message: 'Logged out successfully' };
   }
 
@@ -235,5 +268,27 @@ export class AuthService {
       { sub: userId, user_id: userId, role },
       { expiresIn: this.config.get<number>('jwt.ttl') },
     );
+  }
+
+  generatePowerSyncToken(userId: number): { token: string; powersync_url: string } {
+    const privateKey = this.config.get<string>('powersync.privateKey');
+    const powersyncUrl = this.config.get<string>('powersync.url');
+
+    if (!privateKey || !powersyncUrl) {
+      throw new BadRequestException('PowerSync is not configured');
+    }
+
+    const token = jwt.sign(
+      { sub: String(userId) },
+      privateKey,
+      {
+        algorithm: 'RS256',
+        expiresIn: '1h',
+        issuer: powersyncUrl,
+        audience: powersyncUrl,
+      },
+    );
+
+    return { token, powersync_url: powersyncUrl };
   }
 }

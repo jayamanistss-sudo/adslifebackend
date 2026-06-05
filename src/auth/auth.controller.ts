@@ -1,7 +1,8 @@
 import {
   Controller, Post, Put, Body, Get, Query,
-  UseGuards, HttpCode, HttpStatus,
+  UseGuards, HttpCode, HttpStatus, Req,
 } from '@nestjs/common';
+import type { Request } from 'express';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
@@ -12,6 +13,12 @@ import { Public } from '../common/decorators/public.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 
+function reqCtx(req: Request) {
+  const fwd = req.get('x-forwarded-for');
+  const ip = fwd ? fwd.split(',')[0].trim() : (req.ip ?? '0.0.0.0');
+  return { ip, ua: req.get('user-agent') ?? '', requestId: (req as any).requestId };
+}
+
 @ApiTags('auth')
 @Controller('auth')
 export class AuthController {
@@ -21,16 +28,16 @@ export class AuthController {
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   @Post('login')
   @HttpCode(HttpStatus.OK)
-  async login(@Body() dto: LoginDto) {
-    const data = await this.authService.login(dto);
+  async login(@Body() dto: LoginDto, @Req() req: Request) {
+    const data = await this.authService.login(dto, reqCtx(req));
     return { success: true, data, message: 'Login successful' };
   }
 
   @Public()
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   @Post('register')
-  async register(@Body() dto: RegisterDto) {
-    const data = await this.authService.register(dto);
+  async register(@Body() dto: RegisterDto, @Req() req: Request) {
+    const data = await this.authService.register(dto, reqCtx(req));
     return { success: true, data, message: 'Registration successful' };
   }
 
@@ -131,8 +138,8 @@ export class AuthController {
   @ApiBearerAuth()
   @Post('logout')
   @HttpCode(HttpStatus.OK)
-  async logout(@CurrentUser() user: any) {
-    const data = await this.authService.logout(user.user_id);
+  async logout(@CurrentUser() user: any, @Req() req: Request) {
+    const data = await this.authService.logout(user.user_id, reqCtx(req));
     return { success: true, data };
   }
 }
