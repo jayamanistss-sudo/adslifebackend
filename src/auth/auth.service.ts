@@ -270,6 +270,16 @@ export class AuthService {
     );
   }
 
+  getJwks() {
+    const publicKeyPem = this.config.get<string>('powersync.publicKey');
+    if (!publicKeyPem) return { keys: [] };
+    const keyObject = crypto.createPublicKey(publicKeyPem);
+    const jwk = keyObject.export({ format: 'jwk' }) as Record<string, unknown>;
+    return {
+      keys: [{ ...jwk, use: 'sig', alg: 'RS256', kid: 'powersync-key' }],
+    };
+  }
+
   generatePowerSyncToken(userId: number): { token: string; powersync_url: string } {
     const privateKey = this.config.get<string>('powersync.privateKey');
     const powersyncUrl = this.config.get<string>('powersync.url');

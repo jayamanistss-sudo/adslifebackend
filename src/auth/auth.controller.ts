@@ -142,4 +142,18 @@ export class AuthController {
     const data = await this.authService.logout(user.user_id, reqCtx(req));
     return { success: true, data };
   }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @Get('powersync-token')
+  getPowerSyncToken(@CurrentUser() user: any) {
+    const data = this.authService.generatePowerSyncToken(user.user_id);
+    return { success: true, data };
+  }
+
+  @Public()
+  @Get('.well-known/jwks.json')
+  getJwks() {
+    return this.authService.getJwks();
+  }
 }
