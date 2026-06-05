@@ -119,7 +119,9 @@ export class PaymentService {
     const expected = Buffer.from(
       crypto.createHmac('sha256', this.webhookSecret).update(timestamp + rawBody).digest(),
     ).toString('base64');
-    if (!crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signature))) {
+    const expectedBuf = Buffer.from(expected);
+    const signatureBuf = Buffer.from(signature);
+    if (expectedBuf.length !== signatureBuf.length || !crypto.timingSafeEqual(expectedBuf, signatureBuf)) {
       throw new BadRequestException('Invalid signature');
     }
 

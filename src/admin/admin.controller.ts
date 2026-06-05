@@ -118,4 +118,10 @@ export class AdminController {
     const data = await this.adminService.updateVendor(id, action, extra);
     return { success: true, data, message: 'Vendor updated' };
   }
+
+  @Post('sync-daily-stats')
+  async syncDailyStats(@Body('date') date?: string) {
+    const data = await this.adminService.syncDailyStats(date);
+    return { success: true, data };
+  }
 }

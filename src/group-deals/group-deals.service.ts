@@ -1,10 +1,32 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 
 @Injectable()
 export class GroupDealsService {
   constructor(@InjectDataSource() private readonly db: DataSource) {}
+
+  async create(userId: number, userRole: string, dto: {
+    offer_id: number; min_members: number; max_members?: number; duration_hours?: number;
+  }) {
+    if (userRole === 'admin') {
+      const [offer] = await this.db.query('SELECT id FROM offers WHERE id = ?', [dto.offer_id]);
+      if (!offer) throw new NotFoundException('Offer not found');
+    } else {
+      const [vendor] = await this.db.query('SELECT id FROM vendors WHERE user_id = ?', [userId]);
+      if (!vendor) throw new ForbiddenException('Vendor profile not found');
+      const [offer] = await this.db.query('SELECT id FROM offers WHERE id = ? AND vendor_id = ?', [dto.offer_id, vendor.id]);
+      if (!offer) throw new NotFoundException('Offer not found or does not belong to your vendor profile');
+    }
+
+    const hours = dto.duration_hours ?? 24;
+    const result = await this.db.query(
+      `INSERT INTO group_deals (offer_id, min_members, max_members, status, expires_at)
+       VALUES (?, ?, ?, 'active', DATE_ADD(NOW(), INTERVAL ? HOUR))`,
+      [dto.offer_id, dto.min_members, dto.max_members ?? null, hours],
+    );
+    return { id: result.insertId, offer_id: dto.offer_id, min_members: dto.min_members, expires_in_hours: hours };
+  }
 
   async getActive(lat: number, lng: number) {
     return this.db.query(

@@ -16,6 +16,13 @@ export class RoiQueryDto {
   @Min(1)
   @Max(365)
   days?: number = 30;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  vendor_id?: number;
 }
 
 export class AudienceQueryDto {

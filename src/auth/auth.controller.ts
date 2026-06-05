@@ -1,5 +1,9 @@
-import { Controller, Post, Body, Get, Query, UseGuards, HttpCode, HttpStatus } from '@nestjs/common';
+import {
+  Controller, Post, Put, Body, Get, Query,
+  UseGuards, HttpCode, HttpStatus,
+} from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
@@ -11,11 +15,10 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 @ApiTags('auth')
 @Controller('auth')
 export class AuthController {
-  constructor(
-    private readonly authService: AuthService,
-  ) {}
+  constructor(private readonly authService: AuthService) {}
 
   @Public()
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   @Post('login')
   @HttpCode(HttpStatus.OK)
   async login(@Body() dto: LoginDto) {
@@ -24,6 +27,7 @@ export class AuthController {
   }
 
   @Public()
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   @Post('register')
   async register(@Body() dto: RegisterDto) {
     const data = await this.authService.register(dto);
@@ -52,8 +56,8 @@ export class AuthController {
     const url =
       'https://accounts.google.com/o/oauth2/v2/auth?' +
       new URLSearchParams({
-        client_id:     process.env.GOOGLE_CLIENT_ID     || '',
-        redirect_uri:  process.env.GOOGLE_CALLBACK_URI  || '',
+        client_id:     process.env.GOOGLE_CLIENT_ID    || '',
+        redirect_uri:  process.env.GOOGLE_CALLBACK_URI || '',
         response_type: 'token',
         scope:         'openid profile email',
         prompt:        'select_account',
@@ -63,11 +67,32 @@ export class AuthController {
     return { redirect_url: url };
   }
 
+  @Public()
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  @Post('forgot-password')
+  @HttpCode(HttpStatus.OK)
+  async forgotPassword(@Body('email') email: string) {
+    if (!email) return { success: false, error: 'Email is required' };
+    const data = await this.authService.forgotPassword(email);
+    return { success: true, data };
+  }
+
+  @Public()
+  @Post('reset-password')
+  @HttpCode(HttpStatus.OK)
+  async resetPassword(
+    @Body('token') token: string,
+    @Body('password') password: string,
+  ) {
+    const data = await this.authService.resetPassword(token, password);
+    return { success: true, data };
+  }
+
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @Post('become-vendor')
   async becomeVendor(@CurrentUser() user: any, @Body() dto: BecomeVendorDto) {
-    const data = await this.authService.becomeVendor(user.user_id, dto);
+    const data = await this.authService.becomeVendor(user.user_id, user.role, dto);
     return { success: true, data, message: 'Vendor application submitted' };
   }
 
@@ -76,5 +101,38 @@ export class AuthController {
   @Get('me')
   getMe(@CurrentUser() user: any) {
     return { success: true, data: user };
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @Put('profile')
+  async updateProfile(
+    @CurrentUser() user: any,
+    @Body() dto: { name?: string; phone?: string; city?: string; avatar_url?: string },
+  ) {
+    const data = await this.authService.updateProfile(user.user_id, dto);
+    return { success: true, data };
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @Post('change-password')
+  @HttpCode(HttpStatus.OK)
+  async changePassword(
+    @CurrentUser() user: any,
+    @Body('current_password') currentPassword: string,
+    @Body('new_password') newPassword: string,
+  ) {
+    const data = await this.authService.changePassword(user.user_id, currentPassword, newPassword);
+    return { success: true, data };
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @Post('logout')
+  @HttpCode(HttpStatus.OK)
+  async logout(@CurrentUser() user: any) {
+    const data = await this.authService.logout(user.user_id);
+    return { success: true, data };
   }
 }

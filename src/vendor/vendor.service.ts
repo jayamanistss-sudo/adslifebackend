@@ -219,19 +219,13 @@ export class VendorService {
       [vendorId, limit],
     );
 
-    const [[{ total }]] = await Promise.all([
+    const [[{ total }], [{ this_month }], [{ last_month }]] = await Promise.all([
       this.db.query('SELECT COUNT(*) as total FROM vendor_followers WHERE vendor_id = ?', [vendorId]),
-    ]);
-
-    const [[{ this_month }]] = await Promise.all([
       this.db.query(
         `SELECT COUNT(*) as this_month FROM vendor_followers
          WHERE vendor_id = ? AND MONTH(created_at)=MONTH(NOW()) AND YEAR(created_at)=YEAR(NOW())`,
         [vendorId],
       ),
-    ]);
-
-    const [[{ last_month }]] = await Promise.all([
       this.db.query(
         `SELECT COUNT(*) as last_month FROM vendor_followers
          WHERE vendor_id = ? AND MONTH(created_at)=MONTH(DATE_SUB(NOW(),INTERVAL 1 MONTH))

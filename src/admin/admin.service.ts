@@ -239,4 +239,36 @@ export class AdminService {
     }
     return { updated: true };
   }
+
+  async syncDailyStats(targetDate?: string) {
+    // Default to yesterday so today's partial data is not committed
+    const date = targetDate ?? new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+
+    await this.db.query(
+      `INSERT INTO vendor_daily_stats (vendor_id, stat_date, impressions, clicks, saves, redemptions)
+       SELECT
+         o.vendor_id,
+         ? AS stat_date,
+         COALESCE(SUM(ui.action = 'view'),  0) AS impressions,
+         COALESCE(SUM(ui.action = 'click'), 0) AS clicks,
+         COALESCE(SUM(ui.action = 'save'),  0) AS saves,
+         COALESCE(SUM(ui.action = 'redeem'),0) AS redemptions
+       FROM user_interactions ui
+       JOIN offers o ON ui.offer_id = o.id
+       WHERE DATE(ui.created_at) = ?
+       GROUP BY o.vendor_id
+       ON DUPLICATE KEY UPDATE
+         impressions  = VALUES(impressions),
+         clicks       = VALUES(clicks),
+         saves        = VALUES(saves),
+         redemptions  = VALUES(redemptions)`,
+      [date, date],
+    );
+
+    const [{ affected }] = await this.db.query(
+      'SELECT COUNT(*) as affected FROM vendor_daily_stats WHERE stat_date = ?',
+      [date],
+    );
+    return { synced: true, date, vendor_rows: +affected };
+  }
 }

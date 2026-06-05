@@ -24,18 +24,11 @@ export class AbTestService {
     if (role !== 'admin' && test.vendor_id !== vendorId) throw new ForbiddenException('Access denied');
 
     const statsFor = async (offerId: number) => {
-      const [[views]] = [await this.db.query(
-        'SELECT COUNT(*) as cnt FROM user_interactions WHERE offer_id = ? AND action = "view" AND created_at >= ?',
-        [offerId, test.created_at],
-      )];
-      const [[clicks]] = [await this.db.query(
-        'SELECT COUNT(*) as cnt FROM user_interactions WHERE offer_id = ? AND action = "click" AND created_at >= ?',
-        [offerId, test.created_at],
-      )];
-      const [[saves]] = [await this.db.query(
-        'SELECT COUNT(*) as cnt FROM user_interactions WHERE offer_id = ? AND action = "save" AND created_at >= ?',
-        [offerId, test.created_at],
-      )];
+      const [[views], [clicks], [saves]] = await Promise.all([
+        this.db.query('SELECT COUNT(*) as cnt FROM user_interactions WHERE offer_id = ? AND action = "view" AND created_at >= ?', [offerId, test.created_at]),
+        this.db.query('SELECT COUNT(*) as cnt FROM user_interactions WHERE offer_id = ? AND action = "click" AND created_at >= ?', [offerId, test.created_at]),
+        this.db.query('SELECT COUNT(*) as cnt FROM user_interactions WHERE offer_id = ? AND action = "save" AND created_at >= ?', [offerId, test.created_at]),
+      ]);
       const v = +views.cnt, c = +clicks.cnt, s = +saves.cnt;
       return { views: v, clicks: c, saves: s, ctr: v > 0 ? Math.round((c / v) * 10000) / 100 : 0 };
     };

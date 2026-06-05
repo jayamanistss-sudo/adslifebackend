@@ -5,14 +5,19 @@ import {
 import type { Request } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
-import { extname, join } from 'node:path';
+import { join } from 'node:path';
 import { existsSync, mkdirSync } from 'node:fs';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { ConfigService } from '@nestjs/config';
 
-const ALLOWED_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
+const MIME_EXT: Record<string, string> = {
+  'image/jpeg': '.jpg',
+  'image/png': '.png',
+  'image/webp': '.webp',
+  'image/gif': '.gif',
+};
 const MAX_SIZE = 5 * 1024 * 1024;
 
 @ApiTags('upload')
@@ -32,13 +37,14 @@ export class UploadController {
           cb(null, dir);
         },
         filename: (_req, file, cb) => {
+          const ext = MIME_EXT[file.mimetype] ?? '.bin';
           const unique = `v_${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`;
-          cb(null, `${unique}${extname(file.originalname)}`);
+          cb(null, `${unique}${ext}`);
         },
       }),
       limits: { fileSize: MAX_SIZE },
       fileFilter: (_req, file, cb) => {
-        if (!ALLOWED_TYPES.has(file.mimetype)) {
+        if (!MIME_EXT[file.mimetype]) {
           return cb(new BadRequestException('Only JPEG, PNG, WebP, GIF allowed'), false);
         }
         cb(null, true);

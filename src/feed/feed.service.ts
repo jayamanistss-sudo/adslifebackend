@@ -80,7 +80,6 @@ export class FeedService {
 
     const params: any[] = [
       ...(catList ? preferredCategories : []),
-      ...(catList ? preferredCategories : []),
       ...(vendorList ? preferredVendors : []),
       ...searchParams,
     ];

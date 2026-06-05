@@ -5,6 +5,8 @@ import {
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { GroupDealsService } from './group-deals.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { RolesGuard } from '../common/guards/roles.guard';
+import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Public } from '../common/decorators/public.decorator';
 
@@ -20,6 +22,18 @@ export class GroupDealsController {
     @Query('lng', new DefaultValuePipe(80.2707), ParseFloatPipe) lng: number,
   ) {
     const data = await this.groupDealsService.getActive(lat, lng);
+    return { success: true, data };
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @ApiBearerAuth()
+  @Roles('vendor', 'admin')
+  @Post()
+  async create(
+    @CurrentUser() user: any,
+    @Body() dto: { offer_id: number; min_members: number; max_members?: number; duration_hours?: number },
+  ) {
+    const data = await this.groupDealsService.create(user.user_id, user.role, dto);
     return { success: true, data };
   }
 

@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Param, ParseIntPipe, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, ParseIntPipe, UseGuards, ForbiddenException } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { AbTestService } from './ab-test.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
@@ -20,24 +20,30 @@ export class AbTestController {
     @InjectDataSource() private readonly db: DataSource,
   ) {}
 
+  private async resolveVendorId(user: any): Promise<number> {
+    const [vendor] = await this.db.query('SELECT id FROM vendors WHERE user_id = ?', [user.user_id]);
+    if (!vendor && user.role !== 'admin') throw new ForbiddenException('Vendor profile not found');
+    return vendor?.id ?? 0;
+  }
+
   @Post('create')
   async create(@CurrentUser() user: any, @Body() dto: CreateAbTestDto) {
-    const [vendor] = await this.db.query('SELECT id FROM vendors WHERE user_id = ?', [user.user_id]);
-    const data = await this.abTestService.create(vendor?.id ?? 0, dto);
+    const vendorId = await this.resolveVendorId(user);
+    const data = await this.abTestService.create(vendorId, dto);
     return { success: true, data };
   }
 
   @Get(':id/results')
   async results(@CurrentUser() user: any, @Param('id', ParseIntPipe) id: number) {
-    const [vendor] = await this.db.query('SELECT id FROM vendors WHERE user_id = ?', [user.user_id]);
-    const data = await this.abTestService.results(id, vendor?.id ?? 0, user.role);
+    const vendorId = await this.resolveVendorId(user);
+    const data = await this.abTestService.results(id, vendorId, user.role);
     return { success: true, data };
   }
 
   @Post(':id/conclude')
   async conclude(@CurrentUser() user: any, @Param('id', ParseIntPipe) id: number, @Body() dto: ConcludeAbTestDto) {
-    const [vendor] = await this.db.query('SELECT id FROM vendors WHERE user_id = ?', [user.user_id]);
-    const data = await this.abTestService.conclude(id, dto.winner, vendor?.id ?? 0, user.role);
+    const vendorId = await this.resolveVendorId(user);
+    const data = await this.abTestService.conclude(id, dto.winner, vendorId, user.role);
     return { success: true, data };
   }
 }
