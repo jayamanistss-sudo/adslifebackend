@@ -2,12 +2,14 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { PushService } from '../services/push.service';
+import { MonitoringService } from '../monitoring/monitoring.service';
 
 @Injectable()
 export class AdminService {
   constructor(
     @InjectDataSource() private readonly db: DataSource,
     private readonly push: PushService,
+    private readonly monitoring: MonitoringService,
   ) {}
 
   async getStats() {
@@ -195,7 +197,7 @@ export class AdminService {
     );
   }
 
-  async updateUser(userId: number, action: string, extra: Record<string, any> = {}) {
+  async updateUser(userId: number, action: string, extra: Record<string, any> = {}, adminId?: number) {
     switch (action) {
       case 'ban':    await this.db.query('UPDATE users SET is_active = 0 WHERE id = ?', [userId]); break;
       case 'unban':  await this.db.query('UPDATE users SET is_active = 1 WHERE id = ?', [userId]); break;
@@ -207,6 +209,14 @@ export class AdminService {
         break;
       }
       default: throw new Error('Unknown action');
+    }
+    if (adminId) {
+      setImmediate(() => this.monitoring.logActivity({
+        userId: adminId, role: 'admin', action: `admin_user_${action}`,
+        entityType: 'user', entityId: userId,
+        description: `Admin ${action} on user #${userId}`,
+        metadata: extra,
+      }).catch(() => {}));
     }
     return { updated: true };
   }
@@ -224,7 +234,7 @@ export class AdminService {
     return { updated: true };
   }
 
-  async updateVendor(vendorId: number, action: string, extra: Record<string, any> = {}) {
+  async updateVendor(vendorId: number, action: string, extra: Record<string, any> = {}, adminId?: number) {
     switch (action) {
       case 'approve':  await this.db.query('UPDATE vendors SET status = "approved" WHERE id = ?', [vendorId]); break;
       case 'reject':   await this.db.query('UPDATE vendors SET status = "rejected" WHERE id = ?', [vendorId]); break;
@@ -236,6 +246,14 @@ export class AdminService {
         break;
       }
       default: throw new Error('Unknown action');
+    }
+    if (adminId) {
+      setImmediate(() => this.monitoring.logActivity({
+        userId: adminId, role: 'admin', action: `admin_vendor_${action}`,
+        entityType: 'vendor', entityId: vendorId,
+        description: `Admin ${action} on vendor #${vendorId}`,
+        metadata: extra,
+      }).catch(() => {}));
     }
     return { updated: true };
   }

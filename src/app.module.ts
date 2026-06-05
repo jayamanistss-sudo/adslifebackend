@@ -1,12 +1,15 @@
-import { Module } from '@nestjs/common';
+import { Module, NestModule, MiddlewareConsumer } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { APP_GUARD } from '@nestjs/core';
+import { APP_GUARD, APP_FILTER } from '@nestjs/core';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 
 import configuration from './config/configuration';
 import { DatabaseModule } from './database/database.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
+import { HttpExceptionFilter } from './common/filters/http-exception.filter';
+import { MonitoringModule } from './monitoring/monitoring.module';
+import { RequestLoggingMiddleware } from './monitoring/middleware/request-logging.middleware';
 
 import { AuthModule } from './auth/auth.module';
 import { OffersModule } from './offers/offers.module';
@@ -40,6 +43,9 @@ import { GatewayModule } from './gateway/gateway.module';
     ThrottlerModule.forRoot([{ ttl: 60000, limit: 100 }]),
     DatabaseModule,
 
+    // MonitoringModule must be first so it's available globally
+    MonitoringModule,
+
     AuthModule,
     OffersModule,
     FeedModule,
@@ -67,9 +73,14 @@ import { GatewayModule } from './gateway/gateway.module';
     GatewayModule,
   ],
   providers: [
+    { provide: APP_FILTER, useClass: HttpExceptionFilter },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
     { provide: APP_GUARD, useClass: ThrottlerGuard },
   ],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    consumer.apply(RequestLoggingMiddleware).forRoutes('*');
+  }
+}

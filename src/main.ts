@@ -4,7 +4,6 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { join } from 'node:path';
 import { AppModule } from './app.module';
-import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
@@ -15,16 +14,25 @@ async function bootstrap() {
   app.useStaticAssets(join(process.cwd(), 'uploads'), { prefix: '/uploads' });
 
   app.enableCors({
-    origin: [
-      process.env.FRONTEND_URL || 'http://localhost:5173',
-      'https://adslife.in',
-      'https://www.adslife.in',
-      'https://dev.adslife.in',
-      'https://test.adslife.in',
-      'https://adslifebackend.stss.in',
-      'http://localhost:5173',
-      'http://localhost:3000',
-    ],
+    origin: (origin, callback) => {
+      const allowed = new Set([
+        process.env.FRONTEND_URL || 'http://localhost:5173',
+        'https://adslife.in',
+        'https://www.adslife.in',
+        'https://dev.adslife.in',
+        'https://test.adslife.in',
+        'https://adslifebackend.stss.in',
+        'http://localhost:5173',
+        'http://localhost:3000',
+        'http://localhost:3001',
+        'http://127.0.0.1:3001',
+        'http://127.0.0.1:5500',
+        'http://localhost:5500',
+      ]);
+      // Allow requests with no origin (mobile apps, Postman, curl)
+      if (!origin || allowed.has(origin)) return callback(null, true);
+      callback(new Error(`CORS: origin '${origin}' not allowed`));
+    },
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
     credentials: true,
@@ -36,8 +44,6 @@ async function bootstrap() {
       transform: true,
     }),
   );
-
-  app.useGlobalFilters(new HttpExceptionFilter());
 
   app.setGlobalPrefix('api');
 

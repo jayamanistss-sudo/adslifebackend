@@ -7,6 +7,7 @@ import { AdminService } from './admin.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
 import {
   AdminListQueryDto, AdminVendorQueryDto, AdminOffersQueryDto,
   ReviewVendorDto, BroadcastDto, SiteSettingsDto,
@@ -91,11 +92,12 @@ export class AdminController {
 
   @Put('users/:id')
   async userAction(
+    @CurrentUser() admin: any,
     @Param('id', ParseIntPipe) id: number,
     @Body('action') action: string,
     @Body() extra: Record<string, any>,
   ) {
-    const data = await this.adminService.updateUser(id, action, extra);
+    const data = await this.adminService.updateUser(id, action, extra, admin.user_id);
     return { success: true, data, message: 'User updated' };
   }
 
@@ -111,11 +113,12 @@ export class AdminController {
 
   @Put('vendors/:id')
   async vendorAction(
+    @CurrentUser() admin: any,
     @Param('id', ParseIntPipe) id: number,
     @Body('action') action: string,
     @Body() extra: Record<string, any>,
   ) {
-    const data = await this.adminService.updateVendor(id, action, extra);
+    const data = await this.adminService.updateVendor(id, action, extra, admin.user_id);
     return { success: true, data, message: 'Vendor updated' };
   }
 
