@@ -22,8 +22,8 @@ export class FeedService {
     const offset = (page - 1) * limit;
 
     const [prefs] = await this.db.query('SELECT * FROM user_preferences WHERE user_id = ?', [userId]);
-    const preferredCategories: string[] = prefs?.preferred_categories ?? [];
-    const preferredVendors: number[] = prefs?.preferred_vendors ?? [];
+    const preferredCategories: string[] = JSON.parse(prefs?.preferred_categories ?? '[]');
+    const preferredVendors: number[] = JSON.parse(prefs?.preferred_vendors ?? '[]');
 
     const catList = preferredCategories.length
       ? preferredCategories.map(() => '?').join(',')
@@ -88,8 +88,7 @@ export class FeedService {
       `SELECT COUNT(*) as total FROM offers o JOIN vendors v ON o.vendor_id = v.id
        WHERE o.is_active = 1 AND (o.valid_until IS NULL OR o.valid_until >= NOW())
          AND v.status = 'approved' ${searchClause}`,
-      [...(catList ? preferredCategories : []), ...(catList ? preferredCategories : []),
-       ...(vendorList ? preferredVendors : []), ...searchParams],
+      searchParams,
     );
 
     const offers = await this.db.query(
@@ -257,7 +256,7 @@ export class FeedService {
     if (weight === 0) return;
 
     const [row] = await this.db.query('SELECT * FROM user_preferences WHERE user_id = ?', [userId]);
-    let categories: string[] = row?.preferred_categories ?? [];
+    let categories: string[] = JSON.parse(row?.preferred_categories ?? '[]');
 
     if (weight > 0 && category && !categories.includes(category)) {
       categories.push(category);
