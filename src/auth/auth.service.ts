@@ -270,32 +270,26 @@ export class AuthService {
     );
   }
 
-  getJwks() {
-    const publicKeyPem = this.config.get<string>('powersync.publicKey');
-    if (!publicKeyPem) return { keys: [] };
-    const keyObject = crypto.createPublicKey(publicKeyPem);
-    const jwk = keyObject.export({ format: 'jwk' }) as Record<string, unknown>;
-    return {
-      keys: [{ ...jwk, use: 'sig', alg: 'RS256', kid: 'powersync-key' }],
-    };
-  }
-
   generatePowerSyncToken(userId: number): { token: string; powersync_url: string } {
-    const privateKey = this.config.get<string>('powersync.privateKey');
+    const secret = this.config.get<string>('powersync.secret');
+    const kid = this.config.get<string>('powersync.kid') ?? 'adslife-key-1';
     const powersyncUrl = this.config.get<string>('powersync.url');
 
-    if (!privateKey || !powersyncUrl) {
+    if (!secret || !powersyncUrl) {
       throw new BadRequestException('PowerSync is not configured');
     }
 
+    const secretBuffer = Buffer.from(secret, 'base64');
+
     const token = jwt.sign(
       { sub: String(userId) },
-      privateKey,
+      secretBuffer,
       {
-        algorithm: 'RS256',
+        algorithm: 'HS256',
         expiresIn: '1h',
         issuer: powersyncUrl,
         audience: powersyncUrl,
+        keyid: kid,
       },
     );
 

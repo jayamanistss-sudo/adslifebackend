@@ -45,8 +45,8 @@ export default () => ({
 
   powersync: {
     url: process.env.POWERSYNC_URL || '',
-    privateKey: (process.env.POWERSYNC_PRIVATE_KEY || '').replace(/\\n/g, '\n'),
-    publicKey: (process.env.POWERSYNC_PUBLIC_KEY || '').replace(/\\n/g, '\n'),
+    kid: process.env.POWERSYNC_KID || 'adslife-key-1',
+    secret: process.env.POWERSYNC_SECRET || '',
   },
 
   mymemoryApi: 'https://api.mymemory.translated.net/get',

@@ -151,9 +151,4 @@ export class AuthController {
     return { success: true, data };
   }
 
-  @Public()
-  @Get('.well-known/jwks.json')
-  getJwks() {
-    return this.authService.getJwks();
-  }
 }
