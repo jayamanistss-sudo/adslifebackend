@@ -17,7 +17,7 @@ export class CategoriesController {
   @Get()
   async list() {
     const data = await this.db.query(
-      'SELECT * FROM categories WHERE is_active = 1 ORDER BY sort_order ASC, name ASC',
+      'SELECT * FROM categories ORDER BY is_active DESC, sort_order ASC, name ASC',
     );
     return { success: true, data };
   }
