@@ -26,7 +26,11 @@ export class LeaderboardController {
     const qb = this.leaderboardRepo
       .createQueryBuilder('l')
       .innerJoin(User, 'u', 'l.user_id = u.id')
-      .select(['l', 'u.name', 'u.avatar_url', 'u.city as user_city'])
+      .select([
+        'l.id', 'l.user_id', 'l.period', 'l.score', 'l.city',
+        'u.name', 'u.avatar_url',
+      ])
+      .addSelect('u.city', 'user_city')
       .where('l.period = :period', { period })
       .orderBy('l.score', 'DESC')
       .limit(limit);

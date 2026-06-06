@@ -3,257 +3,455 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>AdsLife – Activity Monitor</title>
+<title>AdsLife Monitor</title>
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet"/>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <style>
-:root{--bg:#0d1117;--sidebar:#161b22;--card:#1c2128;--border:#30363d;--accent:#58a6ff;--green:#3fb950;--red:#f85149;--yellow:#d29922;--text:#e6edf3;--muted:#8b949e}
+/* ── Design Tokens ── */
+:root {
+  --bg:       #F1F5F9;
+  --surface:  #FFFFFF;
+  --sidebar:  #0F172A;
+  --sidebar2: #1E293B;
+  --border:   #E2E8F0;
+  --border2:  #CBD5E1;
+  --accent:   #6366F1;
+  --accent2:  #4F46E5;
+  --green:    #10B981;
+  --red:      #EF4444;
+  --yellow:   #F59E0B;
+  --sky:      #0EA5E9;
+  --text:     #0F172A;
+  --sub:      #475569;
+  --muted:    #94A3B8;
+  --shadow:   0 1px 3px rgba(0,0,0,.08), 0 1px 2px rgba(0,0,0,.06);
+  --shadow-md:0 4px 6px -1px rgba(0,0,0,.08), 0 2px 4px -2px rgba(0,0,0,.06);
+  --radius:   10px;
+}
 *{box-sizing:border-box;margin:0;padding:0}
-body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,sans-serif;display:flex;min-height:100vh}
+body{background:var(--bg);color:var(--text);font-family:'Segoe UI',Inter,system-ui,sans-serif;display:flex;min-height:100vh;font-size:14px}
 a{color:var(--accent);text-decoration:none}
-/* ─── Sidebar ─── */
-#sidebar{width:220px;min-height:100vh;background:var(--sidebar);border-right:1px solid var(--border);display:flex;flex-direction:column;position:fixed;top:0;left:0;z-index:100}
-#sidebar .logo{padding:20px 18px;font-size:1.1rem;font-weight:700;color:var(--accent);border-bottom:1px solid var(--border)}
-#sidebar .logo span{color:var(--text);font-weight:400;font-size:.75rem;display:block;margin-top:2px}
-#sidebar nav{flex:1;padding:10px 0;overflow-y:auto}
-#sidebar nav a{display:flex;align-items:center;gap:10px;padding:9px 18px;color:var(--muted);font-size:.875rem;transition:.15s;cursor:pointer;border-left:3px solid transparent}
-#sidebar nav a:hover,#sidebar nav a.active{color:var(--text);background:rgba(88,166,255,.08);border-left-color:var(--accent)}
-#sidebar nav a svg{width:16px;height:16px;flex-shrink:0}
-#sidebar .sidebar-footer{padding:14px 18px;border-top:1px solid var(--border);font-size:.75rem;color:var(--muted)}
-#sidebar .sidebar-footer #refresh-status{display:block;margin-top:4px;color:var(--green)}
-/* ─── Main ─── */
-#main{margin-left:220px;flex:1;display:flex;flex-direction:column;min-height:100vh}
-#topbar{background:var(--sidebar);border-bottom:1px solid var(--border);padding:12px 24px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:50}
-#topbar h1{font-size:1rem;font-weight:600;color:var(--text)}
-#topbar .topbar-right{display:flex;align-items:center;gap:12px}
-.badge-alert{background:var(--red);color:#fff;border-radius:10px;padding:2px 7px;font-size:.7rem;font-weight:700}
-#content{padding:24px;flex:1}
-/* ─── Login overlay ─── */
-#login-overlay{position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;z-index:9999}
-#login-box{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:40px;width:360px}
-#login-box h2{font-size:1.25rem;font-weight:700;margin-bottom:6px;color:var(--accent)}
-#login-box p{color:var(--muted);font-size:.85rem;margin-bottom:24px}
-.form-label{color:var(--muted);font-size:.8rem;margin-bottom:4px;display:block}
-.form-control{background:#0d1117;border:1px solid var(--border);color:var(--text);border-radius:6px;padding:9px 12px;width:100%;font-size:.875rem;transition:.15s}
-.form-control:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(88,166,255,.15)}
-.form-control::placeholder{color:var(--muted)}
-.btn{padding:9px 18px;border-radius:6px;font-size:.875rem;font-weight:500;cursor:pointer;border:none;transition:.15s}
-.btn-primary{background:var(--accent);color:#000}
-.btn-primary:hover{background:#79b8ff}
-.btn-sm{padding:5px 12px;font-size:.8rem}
+
+/* ── Sidebar ── */
+#sidebar{width:240px;min-height:100vh;background:var(--sidebar);display:flex;flex-direction:column;position:fixed;top:0;left:0;z-index:100;overflow:hidden}
+.sidebar-logo{padding:22px 20px 18px;border-bottom:1px solid rgba(255,255,255,.07)}
+.sidebar-logo .brand{display:flex;align-items:center;gap:10px}
+.sidebar-logo .icon{width:34px;height:34px;background:var(--accent);border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.sidebar-logo .icon svg{width:18px;height:18px;stroke:#fff;fill:none;stroke-width:2}
+.sidebar-logo .name{font-size:.95rem;font-weight:700;color:#F8FAFC;letter-spacing:-.2px}
+.sidebar-logo .env{font-size:.7rem;color:rgba(255,255,255,.4);margin-top:1px}
+.sidebar-section-title{font-size:.65rem;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:rgba(255,255,255,.3);padding:18px 20px 6px}
+#sidebar nav a{display:flex;align-items:center;gap:10px;padding:9px 20px;color:rgba(255,255,255,.55);font-size:.85rem;font-weight:500;cursor:pointer;border-radius:0;transition:.12s;position:relative;text-decoration:none}
+#sidebar nav a svg{width:16px;height:16px;flex-shrink:0;opacity:.7}
+#sidebar nav a:hover{color:rgba(255,255,255,.9);background:rgba(255,255,255,.05)}
+#sidebar nav a:hover svg{opacity:1}
+#sidebar nav a.active{color:#fff;background:rgba(99,102,241,.25)}
+#sidebar nav a.active::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--accent);border-radius:0 2px 2px 0}
+#sidebar nav a.active svg{opacity:1}
+.sidebar-footer{padding:14px 20px;border-top:1px solid rgba(255,255,255,.07);margin-top:auto}
+.sidebar-footer .refresh-row{display:flex;align-items:center;gap:6px;font-size:.75rem;color:rgba(255,255,255,.35)}
+.sidebar-footer .dot{width:7px;height:7px;border-radius:50%;background:var(--green);display:inline-block;box-shadow:0 0 0 2px rgba(16,185,129,.25)}
+
+/* ── Main ── */
+#main{margin-left:240px;flex:1;display:flex;flex-direction:column;min-height:100vh}
+
+/* ── Topbar ── */
+#topbar{background:var(--surface);border-bottom:1px solid var(--border);padding:0 28px;height:58px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:50;box-shadow:0 1px 0 var(--border)}
+.topbar-left{display:flex;align-items:center;gap:12px}
+.topbar-left h1{font-size:.95rem;font-weight:600;color:var(--text)}
+.breadcrumb-sep{color:var(--muted);font-size:.85rem}
+.topbar-right{display:flex;align-items:center;gap:10px}
+.topbar-date{font-size:.78rem;color:var(--muted);background:var(--bg);padding:4px 10px;border-radius:6px;border:1px solid var(--border)}
+
+/* ── Buttons ── */
+.btn{padding:7px 14px;border-radius:7px;font-size:.8rem;font-weight:500;cursor:pointer;border:none;transition:.12s;display:inline-flex;align-items:center;gap:5px;line-height:1}
+.btn-primary{background:var(--accent);color:#fff}
+.btn-primary:hover{background:var(--accent2)}
+.btn-sm{padding:5px 11px;font-size:.77rem}
+.btn-xs{padding:3px 9px;font-size:.73rem}
 .btn-danger{background:var(--red);color:#fff}
-.btn-success{background:var(--green);color:#000}
-.btn-outline{background:transparent;border:1px solid var(--border);color:var(--text)}
-.btn-outline:hover{border-color:var(--accent);color:var(--accent)}
-.btn-warning{background:var(--yellow);color:#000}
-#login-error{color:var(--red);font-size:.8rem;margin-top:10px;display:none}
-/* ─── Cards ─── */
-.stat-card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:18px 22px;display:flex;flex-direction:column;gap:6px}
-.stat-card .label{font-size:.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
-.stat-card .value{font-size:1.8rem;font-weight:700;line-height:1}
-.stat-card .sub{font-size:.78rem;color:var(--muted)}
-.text-green{color:var(--green)}
-.text-red{color:var(--red)}
-.text-yellow{color:var(--yellow)}
-.text-accent{color:var(--accent)}
-/* ─── Tables ─── */
-.card{background:var(--card);border:1px solid var(--border);border-radius:10px;overflow:hidden}
-.card-header{padding:14px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:10px}
-.card-header h5{font-size:.9rem;font-weight:600;margin:0}
-.card-body{padding:0}
-.table-wrap{overflow-x:auto;max-height:520px;overflow-y:auto}
-table{width:100%;border-collapse:collapse;font-size:.8rem}
-thead{position:sticky;top:0;background:var(--sidebar);z-index:1}
-th{padding:10px 14px;color:var(--muted);font-weight:500;text-align:left;border-bottom:1px solid var(--border);white-space:nowrap}
-td{padding:9px 14px;border-bottom:1px solid rgba(48,54,61,.5);white-space:nowrap;max-width:260px;overflow:hidden;text-overflow:ellipsis;vertical-align:middle}
-tr:hover td{background:rgba(255,255,255,.02)}
-/* ─── Badges ─── */
-.badge{display:inline-flex;align-items:center;padding:2px 8px;border-radius:4px;font-size:.73rem;font-weight:600}
-.badge-green{background:rgba(63,185,80,.15);color:var(--green)}
-.badge-red{background:rgba(248,81,73,.15);color:var(--red)}
-.badge-yellow{background:rgba(210,153,34,.15);color:var(--yellow)}
-.badge-blue{background:rgba(88,166,255,.15);color:var(--accent)}
-.badge-gray{background:rgba(139,148,158,.15);color:var(--muted)}
-/* ─── Filter bar ─── */
-.filter-bar{padding:12px 18px;border-bottom:1px solid var(--border);display:flex;flex-wrap:wrap;gap:8px;align-items:center;background:rgba(0,0,0,.2)}
-.filter-bar input,.filter-bar select{background:#0d1117;border:1px solid var(--border);color:var(--text);border-radius:5px;padding:6px 10px;font-size:.8rem}
-.filter-bar input:focus,.filter-bar select:focus{outline:none;border-color:var(--accent)}
-/* ─── Pagination ─── */
-.pagination-bar{padding:12px 18px;border-top:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;font-size:.8rem;color:var(--muted)}
-.page-btn{background:var(--card);border:1px solid var(--border);color:var(--text);border-radius:4px;padding:4px 10px;cursor:pointer;font-size:.8rem}
-.page-btn:disabled{opacity:.4;cursor:default}
-.page-btn:not(:disabled):hover{border-color:var(--accent);color:var(--accent)}
-/* ─── Modal ─── */
-.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:1000;display:none;align-items:center;justify-content:center}
-.modal-overlay.show{display:flex}
-.modal-box{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:24px;width:min(680px,95vw);max-height:85vh;overflow-y:auto}
-.modal-box h4{font-size:1rem;margin-bottom:16px;color:var(--accent)}
-.modal-box pre{background:#0d1117;border:1px solid var(--border);padding:12px;border-radius:6px;font-size:.75rem;overflow-x:auto;white-space:pre-wrap;word-break:break-all;color:var(--muted)}
-.kv{display:grid;grid-template-columns:140px 1fr;gap:6px 12px;font-size:.8rem}
-.kv .k{color:var(--muted);text-align:right}
-.kv .v{color:var(--text);overflow:hidden;text-overflow:ellipsis}
-/* ─── Charts ─── */
-.chart-card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:18px}
-.chart-card h5{font-size:.85rem;color:var(--muted);margin-bottom:14px}
-/* ─── Toast ─── */
-#toast-container{position:fixed;bottom:20px;right:20px;z-index:9000;display:flex;flex-direction:column;gap:8px}
-.toast{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:12px 16px;font-size:.85rem;min-width:240px;animation:fadeIn .2s ease}
-.toast.success{border-left:3px solid var(--green)}
-.toast.error{border-left:3px solid var(--red)}
-@keyframes fadeIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
-/* ─── Sections ─── */
+.btn-danger:hover{background:#DC2626}
+.btn-success{background:var(--green);color:#fff}
+.btn-success:hover{background:#059669}
+.btn-outline{background:transparent;border:1px solid var(--border2);color:var(--sub)}
+.btn-outline:hover{border-color:var(--accent);color:var(--accent);background:rgba(99,102,241,.04)}
+.btn-ghost{background:transparent;color:var(--sub);border:none}
+.btn-ghost:hover{background:var(--bg);color:var(--text)}
+
+/* ── Content ── */
+#content{padding:28px;flex:1}
 .section{display:none}
 .section.active{display:block}
-.section-title{font-size:1.1rem;font-weight:700;margin-bottom:18px;display:flex;align-items:center;gap:10px}
-/* ─── Skeleton ─── */
-.skeleton{background:linear-gradient(90deg,var(--border) 25%,rgba(48,54,61,.3) 50%,var(--border) 75%);background-size:200% 100%;animation:shimmer 1.4s infinite;border-radius:4px;height:14px}
-@keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
-/* ─── Scrollbar ─── */
+.page-header{margin-bottom:22px}
+.page-header h2{font-size:1.15rem;font-weight:700;color:var(--text);display:flex;align-items:center;gap:8px}
+.page-header p{font-size:.82rem;color:var(--muted);margin-top:3px}
+
+/* ── Login ── */
+#login-overlay{position:fixed;inset:0;background:linear-gradient(135deg,#0F172A 0%,#1E293B 50%,#312e81 100%);display:flex;align-items:center;justify-content:center;z-index:9999}
+#login-box{background:#fff;border-radius:16px;padding:40px 44px;width:380px;box-shadow:0 25px 50px rgba(0,0,0,.4)}
+.login-logo{display:flex;align-items:center;gap:11px;margin-bottom:28px}
+.login-logo .icon{width:40px;height:40px;background:var(--accent);border-radius:10px;display:flex;align-items:center;justify-content:center}
+.login-logo .icon svg{width:20px;height:20px;stroke:#fff;fill:none;stroke-width:2}
+.login-logo .brand{font-size:1.1rem;font-weight:700;color:var(--text)}
+.login-logo .sub{font-size:.75rem;color:var(--muted)}
+#login-box h2{font-size:1.25rem;font-weight:700;color:var(--text);margin-bottom:4px}
+#login-box .desc{font-size:.83rem;color:var(--muted);margin-bottom:26px}
+.lbl{display:block;font-size:.78rem;font-weight:600;color:var(--sub);margin-bottom:5px;margin-top:16px}
+.inp{width:100%;padding:9px 13px;border:1.5px solid var(--border);border-radius:8px;font-size:.875rem;color:var(--text);background:#fff;transition:.15s;outline:none}
+.inp:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(99,102,241,.12)}
+#login-error{font-size:.8rem;color:var(--red);margin-top:10px;display:none;background:#FEF2F2;padding:8px 12px;border-radius:6px;border:1px solid #FECACA}
+.btn-login{width:100%;padding:10px;background:var(--accent);color:#fff;border:none;border-radius:8px;font-size:.9rem;font-weight:600;cursor:pointer;margin-top:20px;transition:.15s}
+.btn-login:hover{background:var(--accent2)}
+
+/* ── Stat Cards ── */
+.stat-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:24px}
+@media(max-width:1100px){.stat-grid{grid-template-columns:repeat(2,1fr)}}
+.stat-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px 22px;box-shadow:var(--shadow);position:relative;overflow:hidden}
+.stat-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;border-radius:var(--radius) var(--radius) 0 0}
+.stat-card.blue::before{background:linear-gradient(90deg,#6366F1,#8B5CF6)}
+.stat-card.green::before{background:linear-gradient(90deg,#10B981,#34D399)}
+.stat-card.yellow::before{background:linear-gradient(90deg,#F59E0B,#FCD34D)}
+.stat-card.red::before{background:linear-gradient(90deg,#EF4444,#F87171)}
+.stat-card.sky::before{background:linear-gradient(90deg,#0EA5E9,#38BDF8)}
+.stat-card .s-label{font-size:.72rem;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+.stat-card .s-val{font-size:2rem;font-weight:700;line-height:1.1;margin:6px 0 4px;color:var(--text)}
+.stat-card .s-sub{font-size:.75rem;color:var(--muted)}
+.stat-card .s-icon{position:absolute;right:18px;top:50%;transform:translateY(-50%);width:38px;height:38px;border-radius:10px;display:flex;align-items:center;justify-content:center}
+.stat-card.blue .s-icon{background:rgba(99,102,241,.1)}
+.stat-card.green .s-icon{background:rgba(16,185,129,.1)}
+.stat-card.yellow .s-icon{background:rgba(245,158,11,.1)}
+.stat-card.red .s-icon{background:rgba(239,68,68,.1)}
+.stat-card.sky .s-icon{background:rgba(14,165,233,.1)}
+.stat-card .s-icon svg{width:20px;height:20px;stroke-width:1.8}
+.stat-card.blue .s-icon svg{stroke:var(--accent)}
+.stat-card.green .s-icon svg{stroke:var(--green)}
+.stat-card.yellow .s-icon svg{stroke:var(--yellow)}
+.stat-card.red .s-icon svg{stroke:var(--red)}
+.stat-card.sky .s-icon svg{stroke:var(--sky)}
+
+/* ── Cards ── */
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden}
+.card-header{padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:10px}
+.card-header h5{font-size:.875rem;font-weight:600;margin:0;color:var(--text);display:flex;align-items:center;gap:7px}
+.card-header h5 svg{width:15px;height:15px;stroke:var(--muted);stroke-width:2;flex-shrink:0}
+.card-body{padding:0}
+.card-body.p-lg{padding:20px}
+.chart-wrap{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px 22px;box-shadow:var(--shadow)}
+.chart-wrap h5{font-size:.82rem;font-weight:600;color:var(--sub);margin-bottom:16px;display:flex;align-items:center;gap:6px;text-transform:uppercase;letter-spacing:.04em}
+
+/* ── Tables ── */
+.table-wrap{overflow-x:auto;max-height:520px;overflow-y:auto}
+table{width:100%;border-collapse:collapse;font-size:.8rem}
+thead{position:sticky;top:0;z-index:1;background:var(--bg)}
+th{padding:10px 16px;color:var(--muted);font-weight:600;font-size:.72rem;text-transform:uppercase;letter-spacing:.04em;text-align:left;border-bottom:1px solid var(--border);white-space:nowrap}
+td{padding:10px 16px;border-bottom:1px solid var(--border);white-space:nowrap;max-width:280px;overflow:hidden;text-overflow:ellipsis;vertical-align:middle;color:var(--sub)}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:#F8FAFC}
+tbody tr{transition:.08s}
+
+/* ── Badges ── */
+.badge{display:inline-flex;align-items:center;padding:2px 8px;border-radius:5px;font-size:.71rem;font-weight:600;letter-spacing:.01em}
+.badge-green{background:#ECFDF5;color:#065F46}
+.badge-red{background:#FEF2F2;color:#991B1B}
+.badge-yellow{background:#FFFBEB;color:#92400E}
+.badge-blue{background:#EEF2FF;color:#3730A3}
+.badge-sky{background:#F0F9FF;color:#0C4A6E}
+.badge-gray{background:#F1F5F9;color:#475569}
+.badge-purple{background:#FAF5FF;color:#6B21A8}
+
+/* ── Filter bar ── */
+.filter-bar{padding:14px 18px;border-bottom:1px solid var(--border);display:flex;flex-wrap:wrap;gap:8px;align-items:center;background:#FAFAFA}
+.filter-bar input,.filter-bar select{border:1.5px solid var(--border);border-radius:7px;padding:6px 10px;font-size:.8rem;color:var(--text);background:#fff;outline:none;transition:.12s}
+.filter-bar input:focus,.filter-bar select:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(99,102,241,.1)}
+.filter-bar label{font-size:.8rem;color:var(--sub);display:flex;align-items:center;gap:5px;cursor:pointer}
+
+/* ── Pagination ── */
+.pagination-bar{padding:12px 18px;border-top:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;font-size:.8rem;color:var(--muted);background:#FAFAFA}
+.page-btn{background:#fff;border:1.5px solid var(--border);color:var(--sub);border-radius:6px;padding:4px 12px;cursor:pointer;font-size:.8rem;font-weight:500;transition:.12s}
+.page-btn:disabled{opacity:.4;cursor:default}
+.page-btn:not(:disabled):hover{border-color:var(--accent);color:var(--accent)}
+
+/* ── Modal ── */
+.modal-overlay{position:fixed;inset:0;background:rgba(15,23,42,.45);backdrop-filter:blur(2px);z-index:1000;display:none;align-items:center;justify-content:center}
+.modal-overlay.show{display:flex}
+.modal-box{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:28px;width:min(700px,95vw);max-height:88vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.2)}
+.modal-title-bar{display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid var(--border)}
+.modal-title-bar h4{font-size:.95rem;font-weight:700;color:var(--text)}
+.modal-box pre{background:#F8FAFC;border:1px solid var(--border);padding:14px;border-radius:8px;font-size:.75rem;overflow-x:auto;white-space:pre-wrap;word-break:break-all;color:var(--sub);line-height:1.6}
+.kv{display:grid;grid-template-columns:150px 1fr;gap:7px 14px;font-size:.82rem}
+.kv .k{color:var(--muted);text-align:right;font-weight:500}
+.kv .v{color:var(--text);overflow:hidden;text-overflow:ellipsis}
+.detail-section-label{font-size:.72rem;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin:16px 0 6px}
+
+/* ── Toast ── */
+#toast-container{position:fixed;bottom:24px;right:24px;z-index:9000;display:flex;flex-direction:column;gap:8px}
+.toast{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:13px 18px;font-size:.84rem;min-width:240px;max-width:360px;box-shadow:var(--shadow-md);animation:fadeUp .2s ease;display:flex;align-items:center;gap:10px;color:var(--text)}
+.toast::before{content:'';width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.toast.success::before{background:var(--green)}
+.toast.error::before{background:var(--red)}
+@keyframes fadeUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+
+/* ── Top APIs bar ── */
+.api-bar-row{display:flex;align-items:center;gap:10px;padding:5px 0}
+.api-bar-row .cnt{font-size:.72rem;font-weight:600;color:var(--muted);min-width:32px;text-align:right}
+.api-bar-row .bar-bg{flex:1;background:var(--border);border-radius:4px;height:6px;overflow:hidden}
+.api-bar-row .bar-fill{background:linear-gradient(90deg,var(--accent),#8B5CF6);height:6px;border-radius:4px;transition:.4s}
+.api-bar-row .ep{font-size:.75rem;color:var(--sub);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* ── Scrollbar ── */
 ::-webkit-scrollbar{width:6px;height:6px}
 ::-webkit-scrollbar-track{background:transparent}
-::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+::-webkit-scrollbar-thumb{background:var(--border2);border-radius:3px}
+::-webkit-scrollbar-thumb:hover{background:var(--muted)}
+
+/* ── Alert badge ── */
+.nav-badge{background:var(--red);color:#fff;border-radius:10px;padding:1px 6px;font-size:.67rem;font-weight:700;margin-left:auto}
+
+/* ── Empty state ── */
+.empty-state{text-align:center;padding:48px 20px;color:var(--muted)}
+.empty-state svg{width:40px;height:40px;stroke:var(--border2);margin-bottom:12px}
+.empty-state p{font-size:.85rem}
 </style>
 </head>
 <body>
 
-<!-- Login Overlay -->
+<!-- ── Login ── -->
 <div id="login-overlay">
   <div id="login-box">
-    <h2>AdsLife Monitor</h2>
-    <p>Admin credentials required to access this dashboard</p>
-    <label class="form-label">Email</label>
-    <input id="li-email" class="form-control" type="email" placeholder="admin@adslife.in" value="admin@adslife.in"/>
-    <label class="form-label mt-3">Password</label>
-    <input id="li-pass" class="form-control" type="password" placeholder="••••••••"/>
+    <div class="login-logo">
+      <div class="icon"><svg viewBox="0 0 24 24"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg></div>
+      <div><div class="brand">AdsLife Monitor</div><div class="sub">Admin Dashboard</div></div>
+    </div>
+    <h2>Welcome back</h2>
+    <p class="desc">Sign in with your admin credentials to continue</p>
+    <label class="lbl" for="li-email">Email address</label>
+    <input id="li-email" class="inp" type="email" placeholder="admin@adslife.in" value="admin@adslife.in"/>
+    <label class="lbl" for="li-pass">Password</label>
+    <input id="li-pass" class="inp" type="password" placeholder="••••••••"/>
     <div id="login-error"></div>
-    <button class="btn btn-primary w-100 mt-4" onclick="doLogin()">Sign In</button>
+    <button class="btn-login" onclick="doLogin()">Sign in to Dashboard</button>
   </div>
 </div>
 
-<!-- Sidebar -->
+<!-- ── Sidebar ── -->
 <aside id="sidebar">
-  <div class="logo">AdsLife Monitor<span>Production Dashboard</span></div>
+  <div class="sidebar-logo">
+    <div class="brand">
+      <div class="icon"><svg viewBox="0 0 24 24"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg></div>
+      <div>
+        <div class="name">AdsLife</div>
+        <div class="env">Monitor Dashboard</div>
+      </div>
+    </div>
+  </div>
+  <div class="sidebar-section-title">Analytics</div>
   <nav>
     <a onclick="nav('overview')" class="active" data-section="overview">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
       Overview
     </a>
+  </nav>
+  <div class="sidebar-section-title">Logs</div>
+  <nav>
     <a onclick="nav('api-logs')" data-section="api-logs">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
       API Logs
     </a>
     <a onclick="nav('auth-logs')" data-section="auth-logs">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
       Auth Logs
     </a>
     <a onclick="nav('activity-logs')" data-section="activity-logs">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
       Activity Logs
     </a>
     <a onclick="nav('error-logs')" data-section="error-logs">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
       Error Logs
     </a>
+  </nav>
+  <div class="sidebar-section-title">Security</div>
+  <nav>
     <a onclick="nav('security')" data-section="security">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>
       Security Events
     </a>
     <a onclick="nav('alerts')" data-section="alerts">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
-      Alerts <span id="alert-badge" class="badge-alert ms-auto" style="display:none">0</span>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+      Alerts
+      <span id="alert-badge" class="nav-badge" style="display:none">0</span>
     </a>
     <a onclick="nav('blocked-ips')" data-section="blocked-ips">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
       Blocked IPs
     </a>
   </nav>
   <div class="sidebar-footer">
-    Auto-refresh: 30s
-    <span id="refresh-status">● Active</span>
+    <div class="refresh-row"><span class="dot"></span> Auto-refresh every 30s</div>
   </div>
 </aside>
 
-<!-- Main -->
+<!-- ── Main ── -->
 <div id="main">
   <div id="topbar">
-    <h1 id="topbar-title">Overview Dashboard</h1>
+    <div class="topbar-left">
+      <h1 id="topbar-title">Overview</h1>
+    </div>
     <div class="topbar-right">
-      <span id="topbar-date" style="color:var(--muted);font-size:.8rem"></span>
-      <button class="btn btn-outline btn-sm" onclick="refreshCurrent()">↻ Refresh</button>
-      <button class="btn btn-danger btn-sm" onclick="doLogout()">Sign Out</button>
+      <span id="topbar-date" class="topbar-date"></span>
+      <button class="btn btn-outline btn-sm" onclick="refreshCurrent()">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-4.5"/></svg>
+        Refresh
+      </button>
+      <button class="btn btn-ghost btn-sm" onclick="doLogout()">Sign out</button>
     </div>
   </div>
 
   <div id="content">
 
-    <!-- ═══ OVERVIEW ═══ -->
+    <!-- ══ OVERVIEW ══ -->
     <div id="sec-overview" class="section active">
-      <div class="section-title">📊 Overview Dashboard</div>
-      <div class="row g-3 mb-4" id="stat-cards">
-        <div class="col-6 col-md-3"><div class="stat-card"><div class="label">Total Requests Today</div><div class="value text-accent" id="s-total">—</div></div></div>
-        <div class="col-6 col-md-3"><div class="stat-card"><div class="label">Active Users</div><div class="value text-green" id="s-users">—</div></div></div>
-        <div class="col-6 col-md-3"><div class="stat-card"><div class="label">Failed Logins</div><div class="value text-yellow" id="s-failed">—</div></div></div>
-        <div class="col-6 col-md-3"><div class="stat-card"><div class="label">Avg Response (ms)</div><div class="value" id="s-resp">—</div></div></div>
-        <div class="col-6 col-md-3"><div class="stat-card"><div class="label">4xx Errors</div><div class="value text-yellow" id="s-4xx">—</div></div></div>
-        <div class="col-6 col-md-3"><div class="stat-card"><div class="label">5xx Errors</div><div class="value text-red" id="s-5xx">—</div></div></div>
-        <div class="col-6 col-md-3"><div class="stat-card"><div class="label">Security Events</div><div class="value text-red" id="s-sec">—</div></div></div>
-        <div class="col-6 col-md-3"><div class="stat-card"><div class="label">Unread Alerts</div><div class="value text-yellow" id="s-alerts">—</div></div></div>
+      <div class="page-header">
+        <h2>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+          Overview Dashboard
+        </h2>
+        <p>Real-time system health and request metrics for today</p>
       </div>
-      <div class="row g-3 mb-4">
-        <div class="col-12 col-md-8">
-          <div class="chart-card"><h5>Requests by Hour (Today)</h5><canvas id="hourlyChart" height="100"></canvas></div>
+
+      <div class="stat-grid" id="stat-cards">
+        <div class="stat-card blue">
+          <div class="s-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></div>
+          <div class="s-label">Total Requests</div>
+          <div class="s-val" id="s-total">—</div>
+          <div class="s-sub">Requests today</div>
         </div>
-        <div class="col-12 col-md-4">
-          <div class="chart-card" style="height:100%"><h5>Top Endpoints</h5><div id="top-apis" style="font-size:.8rem"></div></div>
+        <div class="stat-card green">
+          <div class="s-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg></div>
+          <div class="s-label">Active Users</div>
+          <div class="s-val" id="s-users">—</div>
+          <div class="s-sub">Unique today</div>
+        </div>
+        <div class="stat-card sky">
+          <div class="s-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div>
+          <div class="s-label">Avg Response</div>
+          <div class="s-val" id="s-resp">—</div>
+          <div class="s-sub">Milliseconds</div>
+        </div>
+        <div class="stat-card yellow">
+          <div class="s-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg></div>
+          <div class="s-label">Failed Logins</div>
+          <div class="s-val" id="s-failed">—</div>
+          <div class="s-sub">Today</div>
+        </div>
+        <div class="stat-card yellow">
+          <div class="s-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg></div>
+          <div class="s-label">4xx Errors</div>
+          <div class="s-val" id="s-4xx">—</div>
+          <div class="s-sub">Client errors today</div>
+        </div>
+        <div class="stat-card red">
+          <div class="s-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polygon points="7.86 2 16.14 2 22 7.86 22 16.14 16.14 22 7.86 22 2 16.14 2 7.86 7.86 2"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg></div>
+          <div class="s-label">5xx Errors</div>
+          <div class="s-val" id="s-5xx">—</div>
+          <div class="s-sub">Server errors today</div>
+        </div>
+        <div class="stat-card red">
+          <div class="s-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></div>
+          <div class="s-label">Security Events</div>
+          <div class="s-val" id="s-sec">—</div>
+          <div class="s-sub">Suspicious today</div>
+        </div>
+        <div class="stat-card yellow">
+          <div class="s-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg></div>
+          <div class="s-label">Unread Alerts</div>
+          <div class="s-val" id="s-alerts">—</div>
+          <div class="s-sub">Pending review</div>
         </div>
       </div>
+
+      <div class="row g-3 mb-3">
+        <div class="col-12 col-xl-8">
+          <div class="chart-wrap">
+            <h5>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+              Requests by Hour — Today
+            </h5>
+            <canvas id="hourlyChart" height="90"></canvas>
+          </div>
+        </div>
+        <div class="col-12 col-xl-4">
+          <div class="chart-wrap" style="height:100%">
+            <h5>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 16 12 13 21 7 3 4 12 2 12"/></svg>
+              Top Endpoints
+            </h5>
+            <div id="top-apis"></div>
+          </div>
+        </div>
+      </div>
+
       <div class="row g-3">
         <div class="col-12 col-md-6">
-          <div class="card"><div class="card-header"><h5>Top IPs Today</h5></div>
-            <div class="card-body"><div class="table-wrap"><table><thead><tr><th>IP</th><th>Requests</th><th>Action</th></tr></thead>
-            <tbody id="top-ips-table"></tbody></table></div></div>
+          <div class="card">
+            <div class="card-header">
+              <h5><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg> Top IPs Today</h5>
+            </div>
+            <div class="card-body">
+              <div class="table-wrap">
+                <table><thead><tr><th>IP Address</th><th>Requests</th><th>Action</th></tr></thead>
+                <tbody id="top-ips-table"></tbody></table>
+              </div>
+            </div>
           </div>
         </div>
         <div class="col-12 col-md-6">
-          <div class="card"><div class="card-header"><h5>Recent Errors</h5></div>
-            <div class="card-body"><div class="table-wrap"><table><thead><tr><th>Method</th><th>Endpoint</th><th>Status</th><th>Error</th><th>Time</th></tr></thead>
-            <tbody id="recent-errors-table"></tbody></table></div></div>
+          <div class="card">
+            <div class="card-header">
+              <h5><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg> Recent Errors</h5>
+            </div>
+            <div class="card-body">
+              <div class="table-wrap">
+                <table><thead><tr><th>Method</th><th>Endpoint</th><th>Status</th><th>Message</th><th>When</th></tr></thead>
+                <tbody id="recent-errors-table"></tbody></table>
+              </div>
+            </div>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- ═══ API LOGS ═══ -->
+    <!-- ══ API LOGS ══ -->
     <div id="sec-api-logs" class="section">
-      <div class="section-title">📡 API Request Logs</div>
+      <div class="page-header"><h2>API Request Logs</h2><p>All incoming HTTP requests with timing, status and body details</p></div>
       <div class="card">
         <div class="filter-bar">
-          <input type="text" id="af-search" placeholder="Search endpoint / IP..." style="width:200px" onkeydown="if(e.key==='Enter')loadApiLogs()"/>
+          <input type="text" id="af-search" placeholder="Search endpoint / IP…" style="width:200px"/>
           <input type="date" id="af-from" style="width:145px"/>
           <input type="date" id="af-to" style="width:145px"/>
           <input type="number" id="af-user" placeholder="User ID" style="width:100px"/>
           <input type="number" id="af-status" placeholder="Status" style="width:90px"/>
           <select id="af-role"><option value="">All Roles</option><option>user</option><option>vendor</option><option>admin</option></select>
-          <label class="d-flex align-items-center gap-1" style="font-size:.8rem;color:var(--muted)"><input type="checkbox" id="af-errors"> Errors Only</label>
-          <label class="d-flex align-items-center gap-1" style="font-size:.8rem;color:var(--muted)"><input type="checkbox" id="af-suspicious"> Suspicious</label>
+          <label><input type="checkbox" id="af-errors"> Errors Only</label>
+          <label><input type="checkbox" id="af-suspicious"> Suspicious</label>
           <button class="btn btn-primary btn-sm" onclick="loadApiLogs(1)">Filter</button>
-          <button class="btn btn-outline btn-sm" onclick="clearFilter('api');loadApiLogs(1)">Clear</button>
-          <button class="btn btn-outline btn-sm ms-auto" onclick="exportCsv('api_logs')">⬇ Export CSV</button>
+          <button class="btn btn-outline btn-sm" onclick="clearFilter('af');loadApiLogs(1)">Clear</button>
+          <button class="btn btn-outline btn-sm" style="margin-left:auto" onclick="exportCsv('api_logs')">↓ Export CSV</button>
         </div>
         <div class="card-body"><div class="table-wrap"><table>
-          <thead><tr><th>Time</th><th>Request ID</th><th>User</th><th>Role</th><th>IP</th><th>Method</th><th>Endpoint</th><th>Status</th><th>Resp(ms)</th><th>Flag</th><th></th></tr></thead>
+          <thead><tr><th>Time</th><th>Request ID</th><th>User</th><th>Role</th><th>IP</th><th>Method</th><th>Endpoint</th><th>Status</th><th>ms</th><th>Flag</th><th></th></tr></thead>
           <tbody id="api-table"></tbody>
         </table></div></div>
-        <div class="pagination-bar"><span id="api-info">—</span><div class="d-flex gap-2"><button class="page-btn" id="api-prev" onclick="changePage('api',-1)">◀ Prev</button><button class="page-btn" id="api-next" onclick="changePage('api',1)">Next ▶</button></div></div>
+        <div class="pagination-bar"><span id="api-info">—</span><div class="d-flex gap-2"><button class="page-btn" id="api-prev" onclick="changePage('api',-1)">← Prev</button><button class="page-btn" id="api-next" onclick="changePage('api',1)">Next →</button></div></div>
       </div>
     </div>
 
-    <!-- ═══ AUTH LOGS ═══ -->
+    <!-- ══ AUTH LOGS ══ -->
     <div id="sec-auth-logs" class="section">
-      <div class="section-title">🔐 Authentication Logs</div>
+      <div class="page-header"><h2>Authentication Logs</h2><p>Login attempts, failures, registrations and token events</p></div>
       <div class="card">
         <div class="filter-bar">
-          <input type="text" id="auth-search" placeholder="Email / IP..." style="width:200px"/>
+          <input type="text" id="auth-search" placeholder="Email / IP…" style="width:200px"/>
           <input type="date" id="auth-from" style="width:145px"/>
           <input type="date" id="auth-to" style="width:145px"/>
           <select id="auth-action">
@@ -269,112 +467,112 @@ tr:hover td{background:rgba(255,255,255,.02)}
           </select>
           <button class="btn btn-primary btn-sm" onclick="loadAuthLogs(1)">Filter</button>
           <button class="btn btn-outline btn-sm" onclick="clearFilter('auth');loadAuthLogs(1)">Clear</button>
-          <button class="btn btn-outline btn-sm ms-auto" onclick="exportCsv('auth_logs')">⬇ Export CSV</button>
+          <button class="btn btn-outline btn-sm" style="margin-left:auto" onclick="exportCsv('auth_logs')">↓ Export CSV</button>
         </div>
         <div class="card-body"><div class="table-wrap"><table>
-          <thead><tr><th>Time</th><th>Email</th><th>User ID</th><th>Role</th><th>Action</th><th>IP</th><th>Device</th><th>Reason</th></tr></thead>
+          <thead><tr><th>Time</th><th>Email</th><th>User ID</th><th>Role</th><th>Action</th><th>IP</th><th>Browser / OS</th><th>Reason</th></tr></thead>
           <tbody id="auth-table"></tbody>
         </table></div></div>
-        <div class="pagination-bar"><span id="auth-info">—</span><div class="d-flex gap-2"><button class="page-btn" id="auth-prev" onclick="changePage('auth',-1)">◀ Prev</button><button class="page-btn" id="auth-next" onclick="changePage('auth',1)">Next ▶</button></div></div>
+        <div class="pagination-bar"><span id="auth-info">—</span><div class="d-flex gap-2"><button class="page-btn" id="auth-prev" onclick="changePage('auth',-1)">← Prev</button><button class="page-btn" id="auth-next" onclick="changePage('auth',1)">Next →</button></div></div>
       </div>
     </div>
 
-    <!-- ═══ ACTIVITY LOGS ═══ -->
+    <!-- ══ ACTIVITY LOGS ══ -->
     <div id="sec-activity-logs" class="section">
-      <div class="section-title">👤 Activity Logs</div>
+      <div class="page-header"><h2>Activity Logs</h2><p>Admin and vendor actions performed across the platform</p></div>
       <div class="card">
         <div class="filter-bar">
-          <input type="text" id="act-search" placeholder="Action / description..." style="width:200px"/>
+          <input type="text" id="act-search" placeholder="Action / description…" style="width:200px"/>
           <input type="date" id="act-from" style="width:145px"/>
           <input type="date" id="act-to" style="width:145px"/>
           <input type="number" id="act-user" placeholder="User ID" style="width:100px"/>
           <select id="act-role"><option value="">All Roles</option><option>user</option><option>vendor</option><option>admin</option></select>
           <button class="btn btn-primary btn-sm" onclick="loadActivityLogs(1)">Filter</button>
           <button class="btn btn-outline btn-sm" onclick="clearFilter('act');loadActivityLogs(1)">Clear</button>
-          <button class="btn btn-outline btn-sm ms-auto" onclick="exportCsv('activity_logs')">⬇ Export CSV</button>
+          <button class="btn btn-outline btn-sm" style="margin-left:auto" onclick="exportCsv('activity_logs')">↓ Export CSV</button>
         </div>
         <div class="card-body"><div class="table-wrap"><table>
           <thead><tr><th>Time</th><th>User ID</th><th>Role</th><th>Action</th><th>Entity</th><th>Description</th><th>IP</th></tr></thead>
           <tbody id="activity-table"></tbody>
         </table></div></div>
-        <div class="pagination-bar"><span id="activity-info">—</span><div class="d-flex gap-2"><button class="page-btn" id="activity-prev" onclick="changePage('activity',-1)">◀ Prev</button><button class="page-btn" id="activity-next" onclick="changePage('activity',1)">Next ▶</button></div></div>
+        <div class="pagination-bar"><span id="activity-info">—</span><div class="d-flex gap-2"><button class="page-btn" id="activity-prev" onclick="changePage('activity',-1)">← Prev</button><button class="page-btn" id="activity-next" onclick="changePage('activity',1)">Next →</button></div></div>
       </div>
     </div>
 
-    <!-- ═══ ERROR LOGS ═══ -->
+    <!-- ══ ERROR LOGS ══ -->
     <div id="sec-error-logs" class="section">
-      <div class="section-title">🔴 Error Logs</div>
+      <div class="page-header"><h2>Error Logs</h2><p>4xx and 5xx errors with stack traces and request context</p></div>
       <div class="card">
         <div class="filter-bar">
-          <input type="text" id="err-search" placeholder="Error message / endpoint..." style="width:240px"/>
+          <input type="text" id="err-search" placeholder="Error message / endpoint…" style="width:240px"/>
           <input type="date" id="err-from" style="width:145px"/>
           <input type="date" id="err-to" style="width:145px"/>
           <input type="number" id="err-status" placeholder="Status" style="width:90px"/>
           <button class="btn btn-primary btn-sm" onclick="loadErrorLogs(1)">Filter</button>
           <button class="btn btn-outline btn-sm" onclick="clearFilter('err');loadErrorLogs(1)">Clear</button>
-          <button class="btn btn-outline btn-sm ms-auto" onclick="exportCsv('error_logs')">⬇ Export CSV</button>
+          <button class="btn btn-outline btn-sm" style="margin-left:auto" onclick="exportCsv('error_logs')">↓ Export CSV</button>
         </div>
         <div class="card-body"><div class="table-wrap"><table>
           <thead><tr><th>Time</th><th>Status</th><th>Type</th><th>Method</th><th>Endpoint</th><th>Message</th><th>User</th><th>IP</th><th></th></tr></thead>
           <tbody id="error-table"></tbody>
         </table></div></div>
-        <div class="pagination-bar"><span id="error-info">—</span><div class="d-flex gap-2"><button class="page-btn" id="error-prev" onclick="changePage('error',-1)">◀ Prev</button><button class="page-btn" id="error-next" onclick="changePage('error',1)">Next ▶</button></div></div>
+        <div class="pagination-bar"><span id="error-info">—</span><div class="d-flex gap-2"><button class="page-btn" id="error-prev" onclick="changePage('error',-1)">← Prev</button><button class="page-btn" id="error-next" onclick="changePage('error',1)">Next →</button></div></div>
       </div>
     </div>
 
-    <!-- ═══ SECURITY ═══ -->
+    <!-- ══ SECURITY ══ -->
     <div id="sec-security" class="section">
-      <div class="section-title">⚠️ Security Events</div>
+      <div class="page-header"><h2>Security Events</h2><p>Suspicious activity, brute-force attempts and threat detections</p></div>
       <div class="card">
         <div class="filter-bar">
-          <input type="text" id="sec-search" placeholder="Event type / description..." style="width:240px"/>
+          <input type="text" id="sec-search" placeholder="Event type / description…" style="width:240px"/>
           <input type="date" id="sec-from" style="width:145px"/>
           <input type="date" id="sec-to" style="width:145px"/>
           <input type="text" id="sec-ip" placeholder="IP Address" style="width:140px"/>
           <select id="sec-sev"><option value="">All Severity</option><option>low</option><option>medium</option><option>high</option><option>critical</option></select>
           <button class="btn btn-primary btn-sm" onclick="loadSecurityEvents(1)">Filter</button>
           <button class="btn btn-outline btn-sm" onclick="clearFilter('sec');loadSecurityEvents(1)">Clear</button>
-          <button class="btn btn-outline btn-sm ms-auto" onclick="exportCsv('security_events')">⬇ Export CSV</button>
+          <button class="btn btn-outline btn-sm" style="margin-left:auto" onclick="exportCsv('security_events')">↓ Export CSV</button>
         </div>
         <div class="card-body"><div class="table-wrap"><table>
-          <thead><tr><th>Time</th><th>Event Type</th><th>Severity</th><th>IP</th><th>User</th><th>Description</th><th>Status</th><th>Action</th></tr></thead>
+          <thead><tr><th>Time</th><th>Event Type</th><th>Severity</th><th>IP</th><th>User</th><th>Description</th><th>Status</th><th>Actions</th></tr></thead>
           <tbody id="security-table"></tbody>
         </table></div></div>
-        <div class="pagination-bar"><span id="security-info">—</span><div class="d-flex gap-2"><button class="page-btn" id="security-prev" onclick="changePage('security',-1)">◀ Prev</button><button class="page-btn" id="security-next" onclick="changePage('security',1)">Next ▶</button></div></div>
+        <div class="pagination-bar"><span id="security-info">—</span><div class="d-flex gap-2"><button class="page-btn" id="security-prev" onclick="changePage('security',-1)">← Prev</button><button class="page-btn" id="security-next" onclick="changePage('security',1)">Next →</button></div></div>
       </div>
     </div>
 
-    <!-- ═══ ALERTS ═══ -->
+    <!-- ══ ALERTS ══ -->
     <div id="sec-alerts" class="section">
-      <div class="section-title">🔔 Alert Logs</div>
+      <div class="page-header"><h2>Alert Logs</h2><p>System-generated alerts requiring admin attention</p></div>
       <div class="card">
         <div class="filter-bar">
-          <input type="text" id="alr-search" placeholder="Alert title / message..." style="width:240px"/>
+          <input type="text" id="alr-search" placeholder="Alert title / message…" style="width:240px"/>
           <select id="alr-sev"><option value="">All Severity</option><option>info</option><option>warning</option><option>error</option><option>critical</option></select>
           <button class="btn btn-primary btn-sm" onclick="loadAlerts(1)">Filter</button>
           <button class="btn btn-outline btn-sm" onclick="clearFilter('alr');loadAlerts(1)">Clear</button>
         </div>
         <div class="card-body"><div class="table-wrap"><table>
-          <thead><tr><th>Time</th><th>Type</th><th>Severity</th><th>Title</th><th>Message</th><th>Channels</th><th>Read</th></tr></thead>
+          <thead><tr><th>Time</th><th>Type</th><th>Severity</th><th>Title</th><th>Message</th><th>Channels</th><th>Status</th></tr></thead>
           <tbody id="alerts-table"></tbody>
         </table></div></div>
-        <div class="pagination-bar"><span id="alerts-info">—</span><div class="d-flex gap-2"><button class="page-btn" id="alerts-prev" onclick="changePage('alerts',-1)">◀ Prev</button><button class="page-btn" id="alerts-next" onclick="changePage('alerts',1)">Next ▶</button></div></div>
+        <div class="pagination-bar"><span id="alerts-info">—</span><div class="d-flex gap-2"><button class="page-btn" id="alerts-prev" onclick="changePage('alerts',-1)">← Prev</button><button class="page-btn" id="alerts-next" onclick="changePage('alerts',1)">Next →</button></div></div>
       </div>
     </div>
 
-    <!-- ═══ BLOCKED IPs ═══ -->
+    <!-- ══ BLOCKED IPs ══ -->
     <div id="sec-blocked-ips" class="section">
-      <div class="section-title">🚫 Blocked IPs</div>
+      <div class="page-header"><h2>Blocked IPs</h2><p>Manage IP addresses blocked from accessing the API</p></div>
       <div class="row g-3 mb-3">
-        <div class="col-12 col-md-6">
+        <div class="col-12 col-md-5">
           <div class="card">
-            <div class="card-header"><h5>Block New IP</h5></div>
-            <div class="card-body p-3">
+            <div class="card-header"><h5>Block a New IP</h5></div>
+            <div class="card-body p-lg">
               <div class="row g-2">
-                <div class="col-12"><input class="form-control" id="bi-ip" placeholder="IP Address (e.g. 1.2.3.4)"/></div>
-                <div class="col-12"><input class="form-control" id="bi-reason" placeholder="Reason for blocking"/></div>
-                <div class="col-12"><input class="form-control" id="bi-expires" type="datetime-local" placeholder="Expires at (optional)"/></div>
-                <div class="col-12"><button class="btn btn-danger btn-sm" onclick="blockIp()">Block IP</button></div>
+                <div class="col-12"><input class="inp" id="bi-ip" placeholder="IP Address (e.g. 1.2.3.4)"/></div>
+                <div class="col-12"><input class="inp" id="bi-reason" placeholder="Reason for blocking"/></div>
+                <div class="col-12"><input class="inp" id="bi-expires" type="datetime-local"/></div>
+                <div class="col-12 pt-1"><button class="btn btn-danger btn-sm" onclick="blockIp()">Block IP Address</button></div>
               </div>
             </div>
           </div>
@@ -382,19 +580,19 @@ tr:hover td{background:rgba(255,255,255,.02)}
       </div>
       <div class="card">
         <div class="card-body"><div class="table-wrap"><table>
-          <thead><tr><th>IP</th><th>Reason</th><th>Blocked By</th><th>Expires</th><th>Blocked At</th><th>Action</th></tr></thead>
+          <thead><tr><th>IP Address</th><th>Reason</th><th>Blocked By</th><th>Expires</th><th>Blocked At</th><th>Action</th></tr></thead>
           <tbody id="blocked-table"></tbody>
         </table></div></div>
       </div>
     </div>
 
-  </div><!-- /content -->
-</div><!-- /main -->
+  </div>
+</div>
 
-<!-- Detail Modal -->
+<!-- Modal -->
 <div class="modal-overlay" id="detail-modal" onclick="if(event.target===this)closeModal()">
   <div class="modal-box">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+    <div class="modal-title-bar">
       <h4 id="modal-title">Detail</h4>
       <button class="btn btn-outline btn-sm" onclick="closeModal()">✕ Close</button>
     </div>
@@ -402,38 +600,23 @@ tr:hover td{background:rgba(255,255,255,.02)}
   </div>
 </div>
 
-<!-- Toast -->
 <div id="toast-container"></div>
 
 <script>
-// ═══════════════════════════════════════════════════════════════
-// CONFIG
-// ═══════════════════════════════════════════════════════════════
-// When served from a dev server (e.g. Live Server on :5500), always hit the NestJS backend directly.
-// When served by NestJS itself (same origin), use a relative path.
 const API = (location.port !== '3001' && (location.hostname==='localhost'||location.hostname==='127.0.0.1'))
-  ? 'http://127.0.0.1:3001/api'
-  : '/api';
-
+  ? 'http://127.0.0.1:3001/api' : '/api';
 let TOKEN = localStorage.getItem('monitor_token') || '';
 let REFRESH_TIMER = null;
-
 const PAGES = { api:1, auth:1, activity:1, error:1, security:1, alerts:1 };
 const PER_PAGE = 50;
 
-// ═══════════════════════════════════════════════════════════════
-// AUTH
-// ═══════════════════════════════════════════════════════════════
 async function doLogin() {
   const email = document.getElementById('li-email').value.trim();
   const pass  = document.getElementById('li-pass').value;
   const err   = document.getElementById('login-error');
   err.style.display = 'none';
   try {
-    const r = await fetch(`${API}/auth/login`, {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ email, password: pass })
-    });
+    const r = await fetch(`${API}/auth/login`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ email, password: pass }) });
     const d = await r.json();
     if (!d.success) throw new Error(d.error || 'Login failed');
     if (d.data?.user?.role !== 'admin') throw new Error('Admin access required');
@@ -441,44 +624,20 @@ async function doLogin() {
     localStorage.setItem('monitor_token', TOKEN);
     document.getElementById('login-overlay').style.display = 'none';
     init();
-  } catch(e) {
-    err.style.display = 'block';
-    err.textContent = e.message;
-  }
+  } catch(e) { err.style.display='block'; err.textContent=e.message; }
 }
-
-function doLogout() {
-  localStorage.removeItem('monitor_token');
-  TOKEN = '';
-  clearInterval(REFRESH_TIMER);
-  document.getElementById('login-overlay').style.display = 'flex';
-}
-
+function doLogout() { localStorage.removeItem('monitor_token'); TOKEN=''; clearInterval(REFRESH_TIMER); document.getElementById('login-overlay').style.display='flex'; }
 document.getElementById('li-pass').addEventListener('keydown', e => { if(e.key==='Enter') doLogin(); });
 
-// ═══════════════════════════════════════════════════════════════
-// API HELPER
-// ═══════════════════════════════════════════════════════════════
 async function api(path, opts={}) {
-  const r = await fetch(`${API}${path}`, {
-    ...opts,
-    headers: { 'Authorization': `Bearer ${TOKEN}`, 'Content-Type':'application/json', ...(opts.headers||{}) }
-  });
+  const r = await fetch(`${API}${path}`, { ...opts, headers: { 'Authorization': `Bearer ${TOKEN}`, 'Content-Type':'application/json', ...(opts.headers||{}) } });
   if (r.status === 401) { doLogout(); throw new Error('Session expired'); }
   const text = await r.text();
   try { return JSON.parse(text); } catch { return text; }
 }
 
-// ═══════════════════════════════════════════════════════════════
-// NAVIGATION
-// ═══════════════════════════════════════════════════════════════
-const TITLES = {
-  overview:'Overview Dashboard','api-logs':'API Request Logs','auth-logs':'Authentication Logs',
-  'activity-logs':'Activity Logs','error-logs':'Error Logs',security:'Security Events',
-  alerts:'Alert Logs','blocked-ips':'Blocked IPs'
-};
+const TITLES = { overview:'Overview', 'api-logs':'API Logs', 'auth-logs':'Auth Logs', 'activity-logs':'Activity Logs', 'error-logs':'Error Logs', security:'Security Events', alerts:'Alerts', 'blocked-ips':'Blocked IPs' };
 let currentSection = 'overview';
-
 function nav(section) {
   currentSection = section;
   document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
@@ -488,7 +647,6 @@ function nav(section) {
   document.getElementById('topbar-title').textContent = TITLES[section] || section;
   loadSection(section);
 }
-
 function loadSection(s) {
   if (s==='overview') loadOverview();
   else if (s==='api-logs') loadApiLogs(1);
@@ -499,14 +657,9 @@ function loadSection(s) {
   else if (s==='alerts') loadAlerts(1);
   else if (s==='blocked-ips') loadBlockedIps();
 }
-
 function refreshCurrent() { loadSection(currentSection); }
 
-// ═══════════════════════════════════════════════════════════════
-// OVERVIEW
-// ═══════════════════════════════════════════════════════════════
 let hourlyChartInst = null;
-
 async function loadOverview() {
   try {
     const d = await api('/admin/monitoring/overview');
@@ -515,158 +668,113 @@ async function loadOverview() {
     document.getElementById('s-total').textContent = fmt(v.total_requests);
     document.getElementById('s-users').textContent = fmt(v.active_users);
     document.getElementById('s-failed').textContent = fmt(v.failed_logins);
-    document.getElementById('s-resp').textContent = v.avg_response_ms || 0;
+    document.getElementById('s-resp').textContent = (v.avg_response_ms||0) + ' ms';
     document.getElementById('s-4xx').textContent = fmt(v.errors_4xx);
     document.getElementById('s-5xx').textContent = fmt(v.errors_5xx);
     document.getElementById('s-sec').textContent = fmt(v.suspicious_count);
     document.getElementById('s-alerts').textContent = fmt(v.unread_alerts);
-
-    // Alert badge
     const badge = document.getElementById('alert-badge');
-    if (v.unread_alerts > 0) { badge.style.display='inline'; badge.textContent=v.unread_alerts; }
-    else badge.style.display='none';
+    if (v.unread_alerts > 0) { badge.style.display='inline'; badge.textContent=v.unread_alerts; } else badge.style.display='none';
 
-    // Hourly chart
     const hours = Array.from({length:24},(_,i)=>i);
     const counts = hours.map(h => { const r = v.hourly_trend?.find(t=>+t.hr===h); return r ? +r.count : 0; });
     const ctx = document.getElementById('hourlyChart').getContext('2d');
     if (hourlyChartInst) hourlyChartInst.destroy();
     hourlyChartInst = new Chart(ctx, {
       type:'bar',
-      data:{ labels:hours.map(h=>`${h}:00`), datasets:[{data:counts, backgroundColor:'rgba(88,166,255,.5)', borderColor:'#58a6ff', borderWidth:1, borderRadius:3}] },
-      options:{ plugins:{legend:{display:false}}, scales:{x:{ticks:{color:'#8b949e',font:{size:10}},grid:{color:'rgba(48,54,61,.5)'}},y:{ticks:{color:'#8b949e',font:{size:10}},grid:{color:'rgba(48,54,61,.5)'}}}, responsive:true }
+      data:{ labels:hours.map(h=>`${h}:00`), datasets:[{data:counts,backgroundColor:'rgba(99,102,241,.15)',borderColor:'rgba(99,102,241,.8)',borderWidth:1.5,borderRadius:4,hoverBackgroundColor:'rgba(99,102,241,.3)'}] },
+      options:{ plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>`${ctx.parsed.y} requests`}}}, scales:{x:{ticks:{color:'#94A3B8',font:{size:10}},grid:{display:false}},y:{ticks:{color:'#94A3B8',font:{size:10}},grid:{color:'rgba(226,232,240,.8)'}}}, responsive:true }
     });
 
-    // Top APIs
     const ta = document.getElementById('top-apis');
     ta.innerHTML = (v.top_apis||[]).map(a=>`
-      <div style="margin-bottom:6px;display:flex;align-items:center;gap:8px">
-        <span style="color:var(--muted);font-size:.7rem;min-width:30px;text-align:right">${a.count}</span>
-        <div style="flex:1;background:var(--border);border-radius:3px;height:6px">
-          <div style="background:var(--accent);width:${Math.min(100,(a.count/v.top_apis[0].count)*100)}%;height:6px;border-radius:3px"></div>
-        </div>
-        <span style="color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:160px;font-size:.75rem" title="${a.endpoint}">${a.endpoint}</span>
+      <div class="api-bar-row">
+        <span class="cnt">${a.count}</span>
+        <div class="bar-bg"><div class="bar-fill" style="width:${Math.min(100,(a.count/v.top_apis[0].count)*100)}%"></div></div>
+        <span class="ep" title="${a.endpoint}">${a.endpoint}</span>
       </div>`).join('');
 
-    // Top IPs
-    const ti = document.getElementById('top-ips-table');
-    ti.innerHTML = (v.top_ips||[]).map(ip=>`<tr>
-      <td>${ip.ip_address}</td>
+    document.getElementById('top-ips-table').innerHTML = (v.top_ips||[]).map(ip=>`<tr>
+      <td style="font-weight:600;color:var(--text)">${ip.ip_address}</td>
       <td><span class="badge badge-blue">${ip.count}</span></td>
-      <td><button class="btn btn-danger btn-sm" onclick="quickBlock('${ip.ip_address}')">Block</button></td>
-    </tr>`).join('');
+      <td><button class="btn btn-danger btn-xs" onclick="quickBlock('${ip.ip_address}')">Block</button></td>
+    </tr>`).join('') || '<tr><td colspan="3" class="text-center" style="color:var(--muted);padding:20px">No data</td></tr>';
 
-    // Recent errors
-    const re = document.getElementById('recent-errors-table');
-    re.innerHTML = (v.recent_errors||[]).map(e=>`<tr>
-      <td><span class="badge badge-blue">${e.method||'?'}</span></td>
-      <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis" title="${e.endpoint}">${e.endpoint||'-'}</td>
+    document.getElementById('recent-errors-table').innerHTML = (v.recent_errors||[]).length ? v.recent_errors.map(e=>`<tr>
+      <td><span class="badge badge-sky">${e.method||'?'}</span></td>
+      <td title="${e.endpoint}" style="max-width:160px;color:var(--sub)">${e.endpoint||'-'}</td>
       <td>${statusBadge(e.status_code)}</td>
-      <td style="color:var(--red);max-width:180px;overflow:hidden;text-overflow:ellipsis">${e.error_message||'-'}</td>
+      <td style="color:var(--red);max-width:160px;overflow:hidden;text-overflow:ellipsis">${e.error_message||'-'}</td>
       <td style="color:var(--muted)">${relTime(e.created_at)}</td>
-    </tr>`).join('');
-
+    </tr>`).join('') : '<tr><td colspan="5" class="text-center" style="color:var(--muted);padding:20px">No recent errors</td></tr>';
   } catch(e) { console.error(e); }
 }
 
-// ═══════════════════════════════════════════════════════════════
-// API LOGS
-// ═══════════════════════════════════════════════════════════════
 async function loadApiLogs(page) {
   if (page) PAGES.api = page;
-  const params = new URLSearchParams({
-    page: PAGES.api, per_page: PER_PAGE,
-    search: val('af-search'), from_date: val('af-from'), to_date: val('af-to'),
-    user_id: val('af-user'), status_code: val('af-status'), role: val('af-role'),
-    errors_only: document.getElementById('af-errors').checked,
-    suspicious_only: document.getElementById('af-suspicious').checked,
-  });
+  const params = new URLSearchParams({ page:PAGES.api, per_page:PER_PAGE, search:val('af-search'), from_date:val('af-from'), to_date:val('af-to'), user_id:val('af-user'), status_code:val('af-status'), role:val('af-role'), errors_only:document.getElementById('af-errors').checked, suspicious_only:document.getElementById('af-suspicious').checked });
   clean(params);
   const d = await api(`/admin/monitoring/api-logs?${params}`);
   if (!d.success) return;
   const { data, total } = d.data;
   document.getElementById('api-table').innerHTML = data.map(r=>`<tr>
     <td style="color:var(--muted)">${fmtDate(r.created_at)}</td>
-    <td style="color:var(--muted);font-size:.7rem">${r.request_id?.slice(0,12)}…</td>
-    <td>${r.user_id||'—'}</td>
+    <td style="color:var(--muted);font-size:.72rem;font-family:monospace">${r.request_id?.slice(0,10)}…</td>
+    <td style="color:var(--text)">${r.user_id||'—'}</td>
     <td>${roleBadge(r.role)}</td>
-    <td>${r.ip_address}</td>
-    <td><span class="badge badge-blue">${r.method}</span></td>
-    <td title="${r.endpoint}" style="max-width:220px;overflow:hidden;text-overflow:ellipsis">${r.endpoint}</td>
+    <td style="font-family:monospace;font-size:.77rem">${r.ip_address}</td>
+    <td><span class="badge badge-sky">${r.method}</span></td>
+    <td title="${r.endpoint}" style="max-width:220px;color:var(--sub)">${r.endpoint}</td>
     <td>${statusBadge(r.status_code)}</td>
-    <td style="color:${r.response_time_ms>1000?'var(--red)':r.response_time_ms>500?'var(--yellow)':'var(--muted)'}">${r.response_time_ms}</td>
-    <td>${r.is_suspicious?'<span class="badge badge-red">⚠</span>':''}</td>
-    <td><button class="btn btn-outline btn-sm" onclick='showDetail(${JSON.stringify(r)})'>View</button></td>
+    <td style="color:${r.response_time_ms>1000?'var(--red)':r.response_time_ms>500?'var(--yellow)':'var(--muted)'};font-weight:600">${r.response_time_ms}</td>
+    <td>${r.is_suspicious?'<span class="badge badge-red">⚠ Sus</span>':''}</td>
+    <td><button class="btn btn-outline btn-xs" onclick='showDetail(${JSON.stringify(r)})'>View</button></td>
   </tr>`).join('');
   paginate('api', total, PAGES.api);
 }
 
-// ═══════════════════════════════════════════════════════════════
-// AUTH LOGS
-// ═══════════════════════════════════════════════════════════════
 async function loadAuthLogs(page) {
   if (page) PAGES.auth = page;
-  const params = new URLSearchParams({
-    page: PAGES.auth, per_page: PER_PAGE,
-    search: val('auth-search'), from_date: val('auth-from'), to_date: val('auth-to'),
-    action: val('auth-action'),
-  });
+  const params = new URLSearchParams({ page:PAGES.auth, per_page:PER_PAGE, search:val('auth-search'), from_date:val('auth-from'), to_date:val('auth-to'), action:val('auth-action') });
   clean(params);
   const d = await api(`/admin/monitoring/auth-logs?${params}`);
   if (!d.success) return;
   const { data, total } = d.data;
-  document.getElementById('auth-table').innerHTML = data.map(r=>{
-    const di = safeJson(r.device_info);
-    return `<tr>
-      <td style="color:var(--muted)">${fmtDate(r.created_at)}</td>
-      <td>${r.email||'—'}</td>
-      <td>${r.user_id||'—'}</td>
-      <td>${roleBadge(r.role)}</td>
-      <td>${actionBadge(r.action)}</td>
-      <td>${r.ip_address}</td>
-      <td style="color:var(--muted);font-size:.75rem">${di?.browser||'?'} / ${di?.os||'?'}</td>
-      <td style="color:var(--red);font-size:.75rem">${r.failure_reason||''}</td>
-    </tr>`;
-  }).join('');
+  document.getElementById('auth-table').innerHTML = data.map(r=>{ const di=safeJson(r.device_info); return `<tr>
+    <td style="color:var(--muted)">${fmtDate(r.created_at)}</td>
+    <td style="font-weight:500;color:var(--text)">${r.email||'—'}</td>
+    <td>${r.user_id||'—'}</td>
+    <td>${roleBadge(r.role)}</td>
+    <td>${actionBadge(r.action)}</td>
+    <td style="font-family:monospace;font-size:.77rem">${r.ip_address}</td>
+    <td style="color:var(--muted)">${di?.browser||'?'} / ${di?.os||'?'}</td>
+    <td style="color:var(--red)">${r.failure_reason||''}</td>
+  </tr>`; }).join('');
   paginate('auth', total, PAGES.auth);
 }
 
-// ═══════════════════════════════════════════════════════════════
-// ACTIVITY LOGS
-// ═══════════════════════════════════════════════════════════════
 async function loadActivityLogs(page) {
   if (page) PAGES.activity = page;
-  const params = new URLSearchParams({
-    page: PAGES.activity, per_page: PER_PAGE,
-    search: val('act-search'), from_date: val('act-from'), to_date: val('act-to'),
-    user_id: val('act-user'), role: val('act-role'),
-  });
+  const params = new URLSearchParams({ page:PAGES.activity, per_page:PER_PAGE, search:val('act-search'), from_date:val('act-from'), to_date:val('act-to'), user_id:val('act-user'), role:val('act-role') });
   clean(params);
   const d = await api(`/admin/monitoring/activity-logs?${params}`);
   if (!d.success) return;
   const { data, total } = d.data;
   document.getElementById('activity-table').innerHTML = data.map(r=>`<tr>
     <td style="color:var(--muted)">${fmtDate(r.created_at)}</td>
-    <td>${r.user_id}</td>
+    <td style="font-weight:600">${r.user_id}</td>
     <td>${roleBadge(r.role)}</td>
-    <td style="color:var(--accent)">${r.action}</td>
-    <td style="color:var(--muted);font-size:.75rem">${r.entity_type||''}${r.entity_id?` #${r.entity_id}`:''}</td>
-    <td title="${r.description||''}" style="max-width:260px;overflow:hidden;text-overflow:ellipsis">${r.description||'—'}</td>
-    <td>${r.ip_address||'—'}</td>
+    <td style="color:var(--accent);font-weight:500">${r.action}</td>
+    <td><span class="badge badge-gray">${r.entity_type||''}${r.entity_id?` #${r.entity_id}`:''}</span></td>
+    <td title="${r.description||''}" style="max-width:260px;color:var(--sub)">${r.description||'—'}</td>
+    <td style="font-family:monospace;font-size:.77rem">${r.ip_address||'—'}</td>
   </tr>`).join('');
   paginate('activity', total, PAGES.activity);
 }
 
-// ═══════════════════════════════════════════════════════════════
-// ERROR LOGS
-// ═══════════════════════════════════════════════════════════════
 async function loadErrorLogs(page) {
   if (page) PAGES.error = page;
-  const params = new URLSearchParams({
-    page: PAGES.error, per_page: PER_PAGE,
-    search: val('err-search'), from_date: val('err-from'), to_date: val('err-to'),
-    status_code: val('err-status'),
-  });
+  const params = new URLSearchParams({ page:PAGES.error, per_page:PER_PAGE, search:val('err-search'), from_date:val('err-from'), to_date:val('err-to'), status_code:val('err-status') });
   clean(params);
   const d = await api(`/admin/monitoring/error-logs?${params}`);
   if (!d.success) return;
@@ -675,97 +783,77 @@ async function loadErrorLogs(page) {
     <td style="color:var(--muted)">${fmtDate(r.created_at)}</td>
     <td>${statusBadge(r.status_code)}</td>
     <td style="color:var(--yellow);font-size:.75rem">${r.error_type||'-'}</td>
-    <td><span class="badge badge-blue">${r.method||'-'}</span></td>
-    <td title="${r.endpoint||''}" style="max-width:180px;overflow:hidden;text-overflow:ellipsis">${r.endpoint||'-'}</td>
+    <td><span class="badge badge-sky">${r.method||'-'}</span></td>
+    <td title="${r.endpoint||''}" style="max-width:160px;color:var(--sub)">${r.endpoint||'-'}</td>
     <td style="color:var(--red);max-width:200px;overflow:hidden;text-overflow:ellipsis" title="${r.error_message||''}">${r.error_message||'-'}</td>
     <td>${r.user_id||'—'}</td>
-    <td>${r.ip_address||'—'}</td>
-    <td><button class="btn btn-outline btn-sm" onclick='showDetail(${JSON.stringify(r)})'>View</button></td>
+    <td style="font-family:monospace;font-size:.77rem">${r.ip_address||'—'}</td>
+    <td><button class="btn btn-outline btn-xs" onclick='showDetail(${JSON.stringify(r)})'>View</button></td>
   </tr>`).join('');
   paginate('error', total, PAGES.error);
 }
 
-// ═══════════════════════════════════════════════════════════════
-// SECURITY EVENTS
-// ═══════════════════════════════════════════════════════════════
 async function loadSecurityEvents(page) {
   if (page) PAGES.security = page;
-  const params = new URLSearchParams({
-    page: PAGES.security, per_page: PER_PAGE,
-    search: val('sec-search'), from_date: val('sec-from'), to_date: val('sec-to'),
-    ip_address: val('sec-ip'), severity: val('sec-sev'),
-  });
+  const params = new URLSearchParams({ page:PAGES.security, per_page:PER_PAGE, search:val('sec-search'), from_date:val('sec-from'), to_date:val('sec-to'), ip_address:val('sec-ip'), severity:val('sec-sev') });
   clean(params);
   const d = await api(`/admin/monitoring/security-events?${params}`);
   if (!d.success) return;
   const { data, total } = d.data;
   document.getElementById('security-table').innerHTML = data.map(r=>`<tr>
     <td style="color:var(--muted)">${fmtDate(r.created_at)}</td>
-    <td style="color:var(--yellow)">${r.event_type}</td>
+    <td style="color:var(--text);font-weight:500">${r.event_type}</td>
     <td>${severityBadge(r.severity)}</td>
-    <td>${r.ip_address}</td>
+    <td style="font-family:monospace;font-size:.77rem">${r.ip_address}</td>
     <td>${r.user_id||'—'}</td>
-    <td title="${r.description}" style="max-width:240px;overflow:hidden;text-overflow:ellipsis">${r.description}</td>
+    <td title="${r.description}" style="max-width:220px;color:var(--sub)">${r.description}</td>
     <td>${r.is_resolved?'<span class="badge badge-green">Resolved</span>':'<span class="badge badge-red">Open</span>'}</td>
-    <td>${!r.is_resolved?`<button class="btn btn-success btn-sm" onclick="resolveEvent(${r.id})">Resolve</button>
-      <button class="btn btn-danger btn-sm ms-1" onclick="quickBlock('${r.ip_address}')">Block IP</button>`:''}</td>
+    <td style="display:flex;gap:5px">${!r.is_resolved?`<button class="btn btn-success btn-xs" onclick="resolveEvent(${r.id})">Resolve</button><button class="btn btn-danger btn-xs" onclick="quickBlock('${r.ip_address}')">Block IP</button>`:''}</td>
   </tr>`).join('');
   paginate('security', total, PAGES.security);
 }
 
 async function resolveEvent(id) {
   const r = await api(`/admin/monitoring/security-events/${id}/resolve`, {method:'POST'});
-  if (r.success) { toast('Event resolved','success'); loadSecurityEvents(); }
-  else toast(r.error||'Failed','error');
+  if (r.success) { toast('Event resolved','success'); loadSecurityEvents(); } else toast(r.error||'Failed','error');
 }
 
-// ═══════════════════════════════════════════════════════════════
-// ALERTS
-// ═══════════════════════════════════════════════════════════════
 async function loadAlerts(page) {
   if (page) PAGES.alerts = page;
-  const params = new URLSearchParams({
-    page: PAGES.alerts, per_page: PER_PAGE,
-    search: val('alr-search'), severity: val('alr-sev'),
-  });
+  const params = new URLSearchParams({ page:PAGES.alerts, per_page:PER_PAGE, search:val('alr-search'), severity:val('alr-sev') });
   clean(params);
   const d = await api(`/admin/monitoring/alerts?${params}`);
   if (!d.success) return;
   const { data, total } = d.data;
   document.getElementById('alerts-table').innerHTML = data.map(r=>`<tr>
     <td style="color:var(--muted)">${fmtDate(r.created_at)}</td>
-    <td style="color:var(--accent)">${r.alert_type}</td>
+    <td style="color:var(--accent);font-weight:500">${r.alert_type}</td>
     <td>${alertSevBadge(r.severity)}</td>
-    <td style="font-weight:500">${r.title}</td>
-    <td title="${r.message}" style="max-width:260px;overflow:hidden;text-overflow:ellipsis;color:var(--muted)">${r.message}</td>
-    <td style="color:var(--muted);font-size:.75rem">${safeJson(r.notified_channels)?.join(', ')||'—'}</td>
+    <td style="font-weight:600;color:var(--text)">${r.title}</td>
+    <td title="${r.message}" style="max-width:260px;color:var(--sub)">${r.message}</td>
+    <td style="color:var(--muted)">${safeJson(r.notified_channels)?.join(', ')||'—'}</td>
     <td>${r.is_read?'<span class="badge badge-gray">Read</span>':'<span class="badge badge-yellow">New</span>'}</td>
   </tr>`).join('');
   paginate('alerts', total, PAGES.alerts);
 }
 
-// ═══════════════════════════════════════════════════════════════
-// BLOCKED IPs
-// ═══════════════════════════════════════════════════════════════
 async function loadBlockedIps() {
   const d = await api('/admin/monitoring/blocked-ips');
   if (!d.success) return;
-  document.getElementById('blocked-table').innerHTML = (d.data||[]).map(r=>`<tr>
-    <td style="color:var(--red);font-weight:600">${r.ip_address}</td>
-    <td>${r.reason}</td>
-    <td>${r.blocked_by_name||r.blocked_by}</td>
+  document.getElementById('blocked-table').innerHTML = (d.data||[]).length ? (d.data||[]).map(r=>`<tr>
+    <td style="font-weight:700;color:var(--red);font-family:monospace">${r.ip_address}</td>
+    <td>${r.reason||'—'}</td>
+    <td>${r.blocked_by_name||r.blocked_by||'—'}</td>
     <td style="color:var(--muted)">${r.expires_at?fmtDate(r.expires_at):'Never'}</td>
     <td style="color:var(--muted)">${fmtDate(r.created_at)}</td>
-    <td><button class="btn btn-success btn-sm" onclick="unblockIp('${r.ip_address}')">Unblock</button></td>
-  </tr>`).join('');
+    <td><button class="btn btn-success btn-xs" onclick="unblockIp('${r.ip_address}')">Unblock</button></td>
+  </tr>`).join('') : '<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--muted)">No blocked IPs</td></tr>';
 }
 
 async function blockIp() {
-  const ip = val('bi-ip'), reason = val('bi-reason'), expires_at = val('bi-expires');
-  if (!ip || !reason) { toast('IP and reason required','error'); return; }
-  const r = await api('/admin/monitoring/block-ip', {
-    method:'POST', body: JSON.stringify({ ip_address:ip, reason, expires_at: expires_at||undefined })
-  });
+  const ip=val('bi-ip'),reason=val('bi-reason'),expires_at=val('bi-expires');
+  if (!ip||!reason) { toast('IP and reason required','error'); return; }
+  const r = await api('/admin/monitoring/block-ip', { method:'POST', body: JSON.stringify({ ip_address:ip, reason, expires_at:expires_at||undefined }) });
   if (r.success) { toast(`IP ${ip} blocked`,'success'); document.getElementById('bi-ip').value=''; document.getElementById('bi-reason').value=''; loadBlockedIps(); }
   else toast(r.error||'Failed','error');
 }
@@ -773,153 +861,70 @@ async function blockIp() {
 async function quickBlock(ip) {
   const reason = prompt(`Reason for blocking ${ip}:`);
   if (!reason) return;
-  const r = await api('/admin/monitoring/block-ip', {
-    method:'POST', body: JSON.stringify({ ip_address:ip, reason })
-  });
-  if (r.success) { toast(`IP ${ip} blocked`,'success'); loadOverview(); }
-  else toast(r.error||'Failed','error');
+  const r = await api('/admin/monitoring/block-ip', { method:'POST', body: JSON.stringify({ ip_address:ip, reason }) });
+  if (r.success) { toast(`IP ${ip} blocked`,'success'); loadOverview(); } else toast(r.error||'Failed','error');
 }
 
 async function unblockIp(ip) {
   if (!confirm(`Unblock ${ip}?`)) return;
   const r = await api(`/admin/monitoring/block-ip/${ip}`, {method:'DELETE'});
-  if (r.success) { toast(`IP ${ip} unblocked`,'success'); loadBlockedIps(); }
-  else toast(r.error||'Failed','error');
+  if (r.success) { toast(`IP ${ip} unblocked`,'success'); loadBlockedIps(); } else toast(r.error||'Failed','error');
 }
 
-// ═══════════════════════════════════════════════════════════════
-// EXPORT
-// ═══════════════════════════════════════════════════════════════
 async function exportCsv(type) {
-  const url = `${API}/admin/monitoring/export?type=${type}&` + new URLSearchParams({per_page:10000});
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `${type}_${new Date().toISOString().slice(0,10)}.csv`;
-  // Need auth header — fetch and trigger download
+  const url = `${API}/admin/monitoring/export?type=${type}&per_page=10000`;
   const r = await fetch(url, { headers:{ Authorization:`Bearer ${TOKEN}` } });
   const blob = await r.blob();
+  const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
+  a.download = `${type}_${new Date().toISOString().slice(0,10)}.csv`;
   a.click();
   toast('Export downloaded','success');
 }
 
-// ═══════════════════════════════════════════════════════════════
-// DETAIL MODAL
-// ═══════════════════════════════════════════════════════════════
 function showDetail(row) {
-  document.getElementById('modal-title').textContent = `Request Detail — ${row.request_id||row.id}`;
+  document.getElementById('modal-title').textContent = `Request — ${row.request_id||('#'+row.id)}`;
   const skip = ['request_body','response_body','stack_trace','metadata'];
   let html = '<div class="kv mb-3">';
-  for (const [k,v] of Object.entries(row)) {
-    if (skip.includes(k)) continue;
-    html += `<span class="k">${k}</span><span class="v">${v??'—'}</span>`;
-  }
+  for (const [k,v] of Object.entries(row)) { if (skip.includes(k)) continue; html += `<span class="k">${k}</span><span class="v">${v??'—'}</span>`; }
   html += '</div>';
-  if (row.request_body) html += `<div class="mb-2" style="color:var(--muted);font-size:.75rem;margin-bottom:4px">Request Body</div><pre>${JSON.stringify(safeJson(row.request_body),null,2)}</pre>`;
-  if (row.response_body) html += `<div class="mb-2 mt-3" style="color:var(--muted);font-size:.75rem;margin-bottom:4px">Response Body</div><pre>${JSON.stringify(safeJson(row.response_body),null,2)}</pre>`;
-  if (row.stack_trace) html += `<div class="mb-2 mt-3" style="color:var(--red);font-size:.75rem;margin-bottom:4px">Stack Trace</div><pre style="color:var(--red)">${row.stack_trace}</pre>`;
-  if (row.metadata) html += `<div class="mb-2 mt-3" style="color:var(--muted);font-size:.75rem;margin-bottom:4px">Metadata</div><pre>${JSON.stringify(safeJson(row.metadata),null,2)}</pre>`;
+  if (row.request_body) html += `<div class="detail-section-label">Request Body</div><pre>${JSON.stringify(safeJson(row.request_body),null,2)}</pre>`;
+  if (row.response_body) html += `<div class="detail-section-label">Response Body</div><pre>${JSON.stringify(safeJson(row.response_body),null,2)}</pre>`;
+  if (row.stack_trace) html += `<div class="detail-section-label" style="color:var(--red)">Stack Trace</div><pre style="color:var(--red)">${row.stack_trace}</pre>`;
+  if (row.metadata) html += `<div class="detail-section-label">Metadata</div><pre>${JSON.stringify(safeJson(row.metadata),null,2)}</pre>`;
   document.getElementById('modal-body').innerHTML = html;
   document.getElementById('detail-modal').classList.add('show');
 }
+function closeModal() { document.getElementById('detail-modal').classList.remove('show'); }
 
-function closeModal() {
-  document.getElementById('detail-modal').classList.remove('show');
-}
-
-// ═══════════════════════════════════════════════════════════════
-// PAGINATION
-// ═══════════════════════════════════════════════════════════════
 function paginate(key, total, page) {
   const totalPages = Math.max(1, Math.ceil(total / PER_PAGE));
   const from = (page-1)*PER_PAGE+1, to = Math.min(page*PER_PAGE, total);
-  document.getElementById(`${key}-info`).textContent = `Showing ${from}–${to} of ${total}`;
+  document.getElementById(`${key}-info`).textContent = `${fmt(from)}–${fmt(to)} of ${fmt(total)} records`;
   document.getElementById(`${key}-prev`).disabled = page <= 1;
   document.getElementById(`${key}-next`).disabled = page >= totalPages;
 }
-
 function changePage(key, delta) {
   PAGES[key] = Math.max(1, PAGES[key]+delta);
-  if (key==='api') loadApiLogs();
-  else if (key==='auth') loadAuthLogs();
-  else if (key==='activity') loadActivityLogs();
-  else if (key==='error') loadErrorLogs();
-  else if (key==='security') loadSecurityEvents();
-  else if (key==='alerts') loadAlerts();
+  if (key==='api') loadApiLogs(); else if (key==='auth') loadAuthLogs(); else if (key==='activity') loadActivityLogs();
+  else if (key==='error') loadErrorLogs(); else if (key==='security') loadSecurityEvents(); else if (key==='alerts') loadAlerts();
 }
 
-// ═══════════════════════════════════════════════════════════════
-// HELPERS
-// ═══════════════════════════════════════════════════════════════
 function val(id) { return (document.getElementById(id)?.value||'').trim(); }
 function fmt(n) { return n===undefined?'—':Number(n).toLocaleString(); }
-
-function fmtDate(d) {
-  if (!d) return '—';
-  return new Date(d).toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit',hour12:false});
-}
-
-function relTime(d) {
-  if (!d) return '—';
-  const s = Math.floor((Date.now()-new Date(d).getTime())/1000);
-  if (s<60) return `${s}s ago`;
-  if (s<3600) return `${Math.floor(s/60)}m ago`;
-  if (s<86400) return `${Math.floor(s/3600)}h ago`;
-  return `${Math.floor(s/86400)}d ago`;
-}
-
-function safeJson(v) {
-  if (!v) return null;
-  if (typeof v==='object') return v;
-  try { return JSON.parse(v); } catch { return v; }
-}
-
-function statusBadge(code) {
-  if (!code) return '—';
-  const cls = code>=500?'badge-red':code>=400?'badge-yellow':code>=200?'badge-green':'badge-gray';
-  return `<span class="badge ${cls}">${code}</span>`;
-}
-
-function severityBadge(s) {
-  const m = {low:'badge-gray',medium:'badge-yellow',high:'badge-red',critical:'badge-red'};
-  return `<span class="badge ${m[s]||'badge-gray'}">${(s||'').toUpperCase()}</span>`;
-}
-
-function alertSevBadge(s) {
-  const m = {info:'badge-blue',warning:'badge-yellow',error:'badge-red',critical:'badge-red'};
-  return `<span class="badge ${m[s]||'badge-gray'}">${(s||'').toUpperCase()}</span>`;
-}
-
-function roleBadge(r) {
-  if (!r) return '<span class="badge badge-gray">—</span>';
-  const m = {admin:'badge-red',vendor:'badge-yellow',user:'badge-blue'};
-  return `<span class="badge ${m[r]||'badge-gray'}">${r}</span>`;
-}
-
-function actionBadge(a) {
-  if (!a) return '—';
-  const cls = a.includes('failure')||a==='unauthorized'||a==='token_invalid'?'badge-red':
-              a==='login_success'||a==='register'?'badge-green':'badge-blue';
-  return `<span class="badge ${cls}">${a.replace(/_/g,' ')}</span>`;
-}
-
-function clean(params) {
-  for (const [k,v] of [...params.entries()]) {
-    if (v===''||v==='false'||v==='null'||v==='undefined') params.delete(k);
-  }
-}
-
+function fmtDate(d) { if(!d) return '—'; return new Date(d).toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit',hour12:false}); }
+function relTime(d) { if(!d) return '—'; const s=Math.floor((Date.now()-new Date(d).getTime())/1000); if(s<60) return `${s}s ago`; if(s<3600) return `${Math.floor(s/60)}m ago`; if(s<86400) return `${Math.floor(s/3600)}h ago`; return `${Math.floor(s/86400)}d ago`; }
+function safeJson(v) { if(!v) return null; if(typeof v==='object') return v; try{return JSON.parse(v);}catch{return v;} }
+function statusBadge(code) { if(!code) return '—'; const cls=code>=500?'badge-red':code>=400?'badge-yellow':code>=200?'badge-green':'badge-gray'; return `<span class="badge ${cls}">${code}</span>`; }
+function severityBadge(s) { const m={low:'badge-gray',medium:'badge-yellow',high:'badge-red',critical:'badge-red'}; return `<span class="badge ${m[s]||'badge-gray'}">${(s||'').toUpperCase()}</span>`; }
+function alertSevBadge(s) { const m={info:'badge-sky',warning:'badge-yellow',error:'badge-red',critical:'badge-red'}; return `<span class="badge ${m[s]||'badge-gray'}">${(s||'').toUpperCase()}</span>`; }
+function roleBadge(r) { if(!r) return '<span class="badge badge-gray">—</span>'; const m={admin:'badge-purple',vendor:'badge-yellow',user:'badge-blue'}; return `<span class="badge ${m[r]||'badge-gray'}">${r}</span>`; }
+function actionBadge(a) { if(!a) return '—'; const cls=a.includes('failure')||a==='unauthorized'||a==='token_invalid'?'badge-red':a==='login_success'||a==='register'?'badge-green':'badge-blue'; return `<span class="badge ${cls}">${a.replace(/_/g,' ')}</span>`; }
+function clean(params) { for (const [k,v] of [...params.entries()]) { if(v===''||v==='false'||v==='null'||v==='undefined') params.delete(k); } }
 function clearFilter(prefix) {
-  document.querySelectorAll(`#sec-${
-    prefix==='af'?'api-logs':prefix==='auth'?'auth-logs':prefix==='act'?'activity-logs':prefix==='err'?'error-logs':prefix==='sec'?'security':prefix==='alr'?'alerts':''
-  } .filter-bar input, #sec-${
-    prefix==='af'?'api-logs':prefix==='auth'?'auth-logs':prefix==='act'?'activity-logs':prefix==='err'?'error-logs':prefix==='sec'?'security':prefix==='alr'?'alerts':''
-  } .filter-bar select`).forEach(el => { el.value=''; if(el.type==='checkbox') el.checked=false; });
+  const sec = prefix==='af'?'api-logs':prefix==='auth'?'auth-logs':prefix==='act'?'activity-logs':prefix==='err'?'error-logs':prefix==='sec'?'security':prefix==='alr'?'alerts':'';
+  document.querySelectorAll(`#sec-${sec} .filter-bar input, #sec-${sec} .filter-bar select`).forEach(el => { el.value=''; if(el.type==='checkbox') el.checked=false; });
 }
-
-// ═══════════════════════════════════════════════════════════════
-// TOAST
-// ═══════════════════════════════════════════════════════════════
 function toast(msg, type='success') {
   const c = document.getElementById('toast-container');
   const el = document.createElement('div');
@@ -928,28 +933,13 @@ function toast(msg, type='success') {
   c.appendChild(el);
   setTimeout(() => el.remove(), 3500);
 }
-
-// ═══════════════════════════════════════════════════════════════
-// INIT
-// ═══════════════════════════════════════════════════════════════
 function init() {
   document.getElementById('topbar-date').textContent = new Date().toLocaleDateString('en-IN',{weekday:'short',day:'2-digit',month:'short',year:'numeric'});
   loadOverview();
   REFRESH_TIMER = setInterval(() => { loadSection(currentSection); }, 30000);
 }
-
-// On load: check token
-window.addEventListener('load', () => {
-  if (TOKEN) {
-    document.getElementById('login-overlay').style.display = 'none';
-    init();
-  }
-});
-
-// Keyboard shortcuts
-document.addEventListener('keydown', e => {
-  if (e.key==='Escape') closeModal();
-});
+window.addEventListener('load', () => { if (TOKEN) { document.getElementById('login-overlay').style.display='none'; init(); } });
+document.addEventListener('keydown', e => { if(e.key==='Escape') closeModal(); });
 </script>
 </body>
 </html>

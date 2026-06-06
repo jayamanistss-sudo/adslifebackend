@@ -1,4 +1,4 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, Unique } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, Unique } from 'typeorm';
 
 @Entity('leaderboard')
 @Unique(['user_id', 'period'])
@@ -17,7 +17,4 @@ export class Leaderboard {
 
   @Column({ type: 'varchar', length: 100, nullable: true })
   city: string | null;
-
-  @CreateDateColumn()
-  created_at: Date;
 }
