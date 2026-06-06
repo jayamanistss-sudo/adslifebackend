@@ -22,7 +22,6 @@ export class PlansController {
   @Get()
   async list() {
     const data = await this.planRepo.find({
-      where: { is_active: true },
       order: { price: 'ASC' },
     });
     return { success: true, data };
