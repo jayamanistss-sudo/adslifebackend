@@ -13,6 +13,7 @@ import {
   AdminListQueryDto, AdminVendorQueryDto, AdminOffersQueryDto,
   ReviewVendorDto, BroadcastDto, SiteSettingsDto,
   AdminVendorActionDto, AdminUserActionDto, AdminOfferActionDto,
+  BulkVendorPlanDto,
 } from './dto/admin.dto';
 
 @ApiTags('admin')
@@ -112,6 +113,13 @@ export class AdminController {
   ) {
     const data = await this.adminService.updateOffer(id, dto.action, dto);
     return { success: true, data, message: 'Offer updated' };
+  }
+
+  @Put('vendors/bulk-plan')
+  @ApiBody({ type: BulkVendorPlanDto })
+  async bulkVendorPlan(@CurrentUser() admin: any, @Body() dto: BulkVendorPlanDto) {
+    const data = await this.adminService.bulkUpdateVendorPlan(dto.vendor_ids, dto.plan, admin.user_id);
+    return { success: true, data, message: `Plan updated to "${dto.plan}" for ${data.updated} vendor(s)` };
   }
 
   @Put('vendors/:id')

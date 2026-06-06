@@ -1,5 +1,5 @@
 import {
-  IsString, IsOptional, IsIn, IsInt, Min,
+  IsString, IsOptional, IsIn, IsInt, Min, IsArray, ArrayMinSize,
   IsNotEmpty, MaxLength, IsNumber,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -104,6 +104,26 @@ export class BroadcastDto {
   @ApiPropertyOptional({ example: { type: 'general' } })
   @IsOptional()
   data?: Record<string, string>;
+}
+
+export class BulkVendorPlanDto {
+  @ApiProperty({
+    type: [Number],
+    example: [1, 2, 5],
+    description: 'List of vendor IDs to update',
+  })
+  @IsArray()
+  @ArrayMinSize(1)
+  @IsInt({ each: true })
+  vendor_ids: number[];
+
+  @ApiProperty({
+    example: 'starter',
+    description: 'Plan slug to assign to all listed vendors',
+  })
+  @IsString()
+  @IsNotEmpty()
+  plan: string;
 }
 
 export class AdminVendorActionDto {

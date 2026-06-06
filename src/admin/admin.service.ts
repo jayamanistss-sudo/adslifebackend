@@ -302,6 +302,29 @@ export class AdminService {
     return { updated: true };
   }
 
+  async bulkUpdateVendorPlan(vendorIds: number[], plan: string, adminId: number) {
+    if (plan !== 'free') {
+      const dbPlan = await this.planRepo.findOne({ where: { slug: plan, is_active: true }, select: ['slug'] });
+      if (!dbPlan) throw new BadRequestException('Invalid or inactive plan');
+    }
+
+    await this.vendorRepo
+      .createQueryBuilder()
+      .update()
+      .set({ subscription_plan: plan })
+      .whereInIds(vendorIds)
+      .execute();
+
+    setImmediate(() => this.monitoring.logActivity({
+      userId: adminId, role: 'admin', action: 'admin_bulk_update_plan',
+      entityType: 'vendor', entityId: 0,
+      description: `Bulk plan update to "${plan}" for ${vendorIds.length} vendor(s)`,
+      metadata: { vendor_ids: vendorIds, plan },
+    }).catch(() => {}));
+
+    return { updated: vendorIds.length, plan };
+  }
+
   async syncDailyStats(targetDate?: string) {
     const date = targetDate ?? new Date(Date.now() - 86400000).toISOString().slice(0, 10);
 
