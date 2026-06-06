@@ -1,24 +1,30 @@
-import { Controller, Get, Post, Put, Body, Param, ParseIntPipe, UseGuards } from '@nestjs/common';
+import {
+  Controller, Get, Post, Put, Body, Param, ParseIntPipe, UseGuards,
+} from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
-import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource } from 'typeorm';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { Public } from '../common/decorators/public.decorator';
+import { SubscriptionPlan } from '../entities/subscription-plan.entity';
 import { CreatePlanDto, UpdatePlanDto } from './dto/plans.dto';
 
 @ApiTags('plans')
 @Controller('plans')
 export class PlansController {
-  constructor(@InjectDataSource() private readonly db: DataSource) {}
+  constructor(
+    @InjectRepository(SubscriptionPlan) private readonly planRepo: Repository<SubscriptionPlan>,
+  ) {}
 
   @Public()
   @Get()
   async list() {
-    const data = await this.db.query(
-      'SELECT * FROM subscription_plans WHERE is_active = true ORDER BY price ASC',
-    );
+    const data = await this.planRepo.find({
+      where: { is_active: true },
+      order: { price: 'ASC' },
+    });
     return { success: true, data };
   }
 
@@ -27,19 +33,16 @@ export class PlansController {
   @Roles('admin')
   @Post()
   async create(@Body() dto: CreatePlanDto) {
-    const result = await this.db.query(
-      `INSERT INTO subscription_plans (name, slug, price, duration_days, max_offers, features, is_active)
-       VALUES ($1, $2, $3, $4, $5, $6, 1) RETURNING id`,
-      [
-        dto.name,
-        dto.slug,
-        dto.price ?? 0,
-        dto.duration_days ?? 30,
-        dto.max_offers ?? 10,
-        JSON.stringify(dto.features ?? []),
-      ],
-    );
-    return { success: true, data: { id: result[0].id } };
+    const plan = await this.planRepo.save({
+      name: dto.name,
+      slug: dto.slug,
+      price: dto.price ?? 0,
+      duration_days: dto.duration_days ?? 30,
+      max_offers: dto.max_offers ?? null,
+      features: dto.features ?? [],
+      is_active: true,
+    });
+    return { success: true, data: { id: plan.id } };
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)
@@ -47,19 +50,17 @@ export class PlansController {
   @Roles('admin')
   @Put(':id')
   async update(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdatePlanDto) {
-    const fields = ['name', 'slug', 'price', 'duration_days', 'max_offers', 'is_active'] as const;
-    const updates: string[] = [];
-    const values: any[] = [];
-    for (const f of fields) {
-      if (dto[f] !== undefined) { values.push(dto[f]); updates.push(`${f} = $${values.length}`); }
-    }
-    if (dto.features !== undefined) {
-      values.push(JSON.stringify(dto.features));
-      updates.push(`features = $${values.length}`);
-    }
-    if (!updates.length) return { success: false, error: 'Nothing to update' };
-    values.push(id);
-    await this.db.query(`UPDATE subscription_plans SET ${updates.join(', ')} WHERE id = $${values.length}`, values);
+    const updateData: Partial<SubscriptionPlan> = {};
+    if (dto.name       !== undefined) updateData.name          = dto.name;
+    if (dto.slug       !== undefined) updateData.slug          = dto.slug;
+    if (dto.price      !== undefined) updateData.price         = dto.price as any;
+    if (dto.duration_days !== undefined) updateData.duration_days = dto.duration_days;
+    if (dto.max_offers !== undefined) updateData.max_offers    = dto.max_offers;
+    if (dto.features   !== undefined) updateData.features      = dto.features;
+    if (dto.is_active  !== undefined) updateData.is_active     = dto.is_active === 1;
+
+    if (!Object.keys(updateData).length) return { success: false, error: 'Nothing to update' };
+    await this.planRepo.update(id, updateData);
     return { success: true, data: { updated: true } };
   }
 }
