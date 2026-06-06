@@ -249,8 +249,10 @@ export class AdminService {
       case 'reject':   await this.db.query('UPDATE vendors SET status = \'rejected\' WHERE id = $1', [vendorId]); break;
       case 'suspend':  await this.db.query('UPDATE vendors SET status = \'suspended\' WHERE id = $1', [vendorId]); break;
       case 'update_plan': {
-        const [plan] = await this.db.query('SELECT slug FROM subscription_plans WHERE slug = $1', [extra.plan]);
-        if (!plan) throw new BadRequestException('Invalid plan');
+        if (!extra.plan) throw new BadRequestException('Plan is required');
+        // Check DB first; also allow 'free' which is the default and may not have a table row
+        const [dbPlan] = await this.db.query('SELECT slug FROM subscription_plans WHERE slug = $1', [extra.plan]);
+        if (!dbPlan && extra.plan !== 'free') throw new BadRequestException('Invalid plan');
         await this.db.query('UPDATE vendors SET subscription_plan = $1 WHERE id = $2', [extra.plan, vendorId]);
         break;
       }
