@@ -2,7 +2,7 @@ import {
   Controller, Get, Post, Put, Delete, Body, Param, ParseIntPipe,
   UseGuards, Query,
 } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
+import { ApiTags, ApiBearerAuth, ApiBody } from '@nestjs/swagger';
 import { VendorService } from './vendor.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -53,6 +53,7 @@ export class VendorController {
   }
 
   @Post('follow')
+  @ApiBody({ schema: { required: ['vendor_id'], properties: { vendor_id: { type: 'number', example: 1 } } } })
   async toggleFollow(@CurrentUser() user: any, @Body('vendor_id') vendorId: number) {
     const data = await this.vendorService.toggleFollow(user.user_id, +vendorId);
     return { success: true, data };

@@ -1,6 +1,6 @@
 import {
   IsString, IsOptional, IsIn, IsInt, Min,
-  IsNotEmpty, MaxLength,
+  IsNotEmpty, MaxLength, IsNumber,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
@@ -104,6 +104,72 @@ export class BroadcastDto {
   @ApiPropertyOptional({ example: { type: 'general' } })
   @IsOptional()
   data?: Record<string, string>;
+}
+
+export class AdminVendorActionDto {
+  @ApiProperty({
+    enum: ['approve', 'reject', 'suspend', 'update_plan'],
+    example: 'update_plan',
+    description: 'Action to perform on the vendor',
+  })
+  @IsString()
+  @IsIn(['approve', 'reject', 'suspend', 'update_plan'])
+  action: string;
+
+  @ApiPropertyOptional({
+    enum: ['free', 'starter', 'professional', 'enterprise'],
+    example: 'starter',
+    description: 'Required when action = update_plan',
+  })
+  @IsOptional()
+  @IsString()
+  plan?: string;
+
+  @ApiPropertyOptional({ example: 'Violation of terms', description: 'Optional note for reject/suspend' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  note?: string;
+}
+
+export class AdminUserActionDto {
+  @ApiProperty({
+    enum: ['ban', 'unban', 'delete', 'update_role'],
+    example: 'update_role',
+    description: 'Action to perform on the user',
+  })
+  @IsString()
+  @IsIn(['ban', 'unban', 'delete', 'update_role'])
+  action: string;
+
+  @ApiPropertyOptional({
+    enum: ['user', 'vendor', 'admin'],
+    example: 'vendor',
+    description: 'Required when action = update_role',
+  })
+  @IsOptional()
+  @IsString()
+  role?: string;
+}
+
+export class AdminOfferActionDto {
+  @ApiProperty({
+    enum: ['activate', 'deactivate', 'delete', 'feature'],
+    example: 'activate',
+    description: 'Action to perform on the offer',
+  })
+  @IsString()
+  @IsIn(['activate', 'deactivate', 'delete', 'feature'])
+  action: string;
+
+  @ApiPropertyOptional({
+    example: 1,
+    description: 'Required when action = feature. 1 = featured, 0 = unfeatured',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  featured?: number;
 }
 
 export class SiteSettingsDto {

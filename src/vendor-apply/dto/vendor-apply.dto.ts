@@ -12,73 +12,73 @@ export class SubmitVendorApplicationDto {
   @MaxLength(200)
   business_name: string;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ example: 'food-dining' })
   @IsOptional()
   @emptyToUndefined()
   @IsString()
   @MaxLength(100)
   category?: string;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ example: 'Chennai' })
   @IsOptional()
   @emptyToUndefined()
   @IsString()
   @MaxLength(100)
   city?: string;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ example: '12, Anna Nagar, Chennai - 600040' })
   @IsOptional()
   @emptyToUndefined()
   @IsString()
   @MaxLength(300)
   address?: string;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ example: '9876543210' })
   @IsOptional()
   @emptyToUndefined()
   @IsString()
   @Matches(/^[+\d\s\-()]{7,20}$/, { message: 'Invalid phone number' })
   phone?: string;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ example: 'https://saibakery.in' })
   @IsOptional()
   @emptyToUndefined()
   @IsUrl({}, { message: 'website must be a valid URL' })
   website?: string;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ example: '29ABCDE1234F1Z5' })
   @IsOptional()
   @emptyToUndefined()
   @IsString()
   @MaxLength(20)
   gst_number?: string;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ example: 'Freshly baked goods delivered daily in Chennai.' })
   @IsOptional()
   @emptyToUndefined()
   @IsString()
   @MaxLength(1000)
   description?: string;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ example: 13.0827 })
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
   lat?: number;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ example: 80.2707 })
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
   lng?: number;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ example: 'https://cdn.adslife.in/logos/sai-bakery.png' })
   @IsOptional()
   @emptyToUndefined()
   @IsString()
   logo_url?: string;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ example: 1, description: 'ID of the subscription plan (optional)' })
   @IsOptional()
   @Type(() => Number)
   @IsNumber()

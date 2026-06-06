@@ -2,7 +2,7 @@ import {
   Controller, Get, Post, Put, Body, Param, Query,
   ParseIntPipe, UseGuards,
 } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
+import { ApiTags, ApiBearerAuth, ApiBody } from '@nestjs/swagger';
 import { AdminService } from './admin.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -12,6 +12,7 @@ import { Public } from '../common/decorators/public.decorator';
 import {
   AdminListQueryDto, AdminVendorQueryDto, AdminOffersQueryDto,
   ReviewVendorDto, BroadcastDto, SiteSettingsDto,
+  AdminVendorActionDto, AdminUserActionDto, AdminOfferActionDto,
 } from './dto/admin.dto';
 
 @ApiTags('admin')
@@ -93,38 +94,39 @@ export class AdminController {
   }
 
   @Put('users/:id')
+  @ApiBody({ type: AdminUserActionDto })
   async userAction(
     @CurrentUser() admin: any,
     @Param('id', ParseIntPipe) id: number,
-    @Body('action') action: string,
-    @Body() extra: Record<string, any>,
+    @Body() dto: AdminUserActionDto,
   ) {
-    const data = await this.adminService.updateUser(id, action, extra, admin.user_id);
+    const data = await this.adminService.updateUser(id, dto.action, dto, admin.user_id);
     return { success: true, data, message: 'User updated' };
   }
 
   @Put('offers/:id')
+  @ApiBody({ type: AdminOfferActionDto })
   async offerAction(
     @Param('id', ParseIntPipe) id: number,
-    @Body('action') action: string,
-    @Body() extra: Record<string, any>,
+    @Body() dto: AdminOfferActionDto,
   ) {
-    const data = await this.adminService.updateOffer(id, action, extra);
+    const data = await this.adminService.updateOffer(id, dto.action, dto);
     return { success: true, data, message: 'Offer updated' };
   }
 
   @Put('vendors/:id')
+  @ApiBody({ type: AdminVendorActionDto })
   async vendorAction(
     @CurrentUser() admin: any,
     @Param('id', ParseIntPipe) id: number,
-    @Body('action') action: string,
-    @Body() extra: Record<string, any>,
+    @Body() dto: AdminVendorActionDto,
   ) {
-    const data = await this.adminService.updateVendor(id, action, extra, admin.user_id);
+    const data = await this.adminService.updateVendor(id, dto.action, dto, admin.user_id);
     return { success: true, data, message: 'Vendor updated' };
   }
 
   @Post('sync-daily-stats')
+  @ApiBody({ schema: { properties: { date: { type: 'string', example: '2026-06-05', description: 'YYYY-MM-DD — defaults to yesterday' } } } })
   async syncDailyStats(@Body('date') date?: string) {
     const data = await this.adminService.syncDailyStats(date);
     return { success: true, data };

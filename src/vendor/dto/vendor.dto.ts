@@ -24,7 +24,7 @@ export class UpdateVendorProfileDto {
   @MaxLength(100)
   city?: string;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ example: '12, Anna Nagar, Chennai - 600040' })
   @IsOptional()
   @IsString()
   address?: string;
@@ -35,17 +35,17 @@ export class UpdateVendorProfileDto {
   @Matches(/^[0-9+\-\s()]{7,15}$/, { message: 'Invalid phone number' })
   phone?: string;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ example: 'https://saibakery.in' })
   @IsOptional()
   @IsUrl()
   website?: string;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ example: 'Freshly baked goods delivered daily in Chennai.' })
   @IsOptional()
   @IsString()
   description?: string;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ example: 'https://cdn.adslife.in/logos/sai-bakery.png' })
   @IsOptional()
   @IsUrl()
   logo_url?: string;
@@ -62,7 +62,7 @@ export class UpdateVendorProfileDto {
   @IsLongitude()
   lng?: number;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ example: '29ABCDE1234F1Z5' })
   @IsOptional()
   @IsString()
   @MaxLength(20)
