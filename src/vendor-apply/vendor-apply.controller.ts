@@ -1,9 +1,10 @@
 import { Controller, Post, Body, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
-import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource } from 'typeorm';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { VendorApplication } from '../entities/vendor-application.entity';
 import { SubmitVendorApplicationDto } from './dto/vendor-apply.dto';
 
 @ApiTags('vendor-apply')
@@ -11,40 +12,38 @@ import { SubmitVendorApplicationDto } from './dto/vendor-apply.dto';
 @UseGuards(JwtAuthGuard)
 @Controller('vendor-apply')
 export class VendorApplyController {
-  constructor(@InjectDataSource() private readonly db: DataSource) {}
+  constructor(
+    @InjectRepository(VendorApplication) private readonly applicationRepo: Repository<VendorApplication>,
+  ) {}
 
   @Post('submit')
   async submit(@CurrentUser() user: any, @Body() dto: SubmitVendorApplicationDto) {
-    const [existing] = await this.db.query(
-      "SELECT id FROM vendor_applications WHERE user_id = $1 AND status = 'pending'",
-      [user.user_id],
-    );
+    const existing = await this.applicationRepo.findOne({
+      where: { user_id: user.user_id, status: 'pending' },
+      select: ['id'],
+    });
     if (existing) {
       return { success: false, error: 'You already have a pending application' };
     }
 
-    const result = await this.db.query(
-      `INSERT INTO vendor_applications
-         (user_id, business_name, category, city, address, phone, website, gst_number, description, lat, lng, logo_url, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'pending') RETURNING id`,
-      [
-        user.user_id,
-        dto.business_name,
-        dto.category ?? null,
-        dto.city ?? null,
-        dto.address ?? null,
-        dto.phone ?? null,
-        dto.website ?? null,
-        dto.gst_number ?? null,
-        dto.description ?? null,
-        dto.lat ?? null,
-        dto.lng ?? null,
-        dto.logo_url ?? null,
-      ],
-    );
+    const application = await this.applicationRepo.save({
+      user_id: user.user_id,
+      business_name: dto.business_name,
+      category: dto.category ?? null,
+      city: dto.city ?? null,
+      address: dto.address ?? null,
+      phone: dto.phone ?? null,
+      website: dto.website ?? null,
+      gst_number: dto.gst_number ?? null,
+      description: dto.description ?? null,
+      lat: dto.lat ?? null,
+      lng: dto.lng ?? null,
+      logo_url: dto.logo_url ?? null,
+      status: 'pending',
+    });
     return {
       success: true,
-      data: { id: result[0].id, status: 'pending', message: 'Application submitted for review' },
+      data: { id: application.id, status: 'pending', message: 'Application submitted for review' },
     };
   }
 }

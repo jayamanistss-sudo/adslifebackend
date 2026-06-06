@@ -3,14 +3,15 @@ import {
   ForbiddenException, BadRequestException,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import { AnalyticsService } from './analytics.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { Vendor } from '../entities/vendor.entity';
 import { RoiQueryDto, AudienceQueryDto, HeatmapQueryDto, BenchmarkQueryDto } from './dto/analytics.dto';
-import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource } from 'typeorm';
 
 @ApiTags('analytics')
 @ApiBearerAuth()
@@ -20,16 +21,15 @@ import { DataSource } from 'typeorm';
 export class AnalyticsController {
   constructor(
     private readonly analyticsService: AnalyticsService,
-    @InjectDataSource() private readonly db: DataSource,
+    @InjectRepository(Vendor) private readonly vendorRepo: Repository<Vendor>,
   ) {}
 
-  // Admin must pass ?vendor_id=X; vendors resolve from their JWT automatically
   private async resolveVendorId(user: any, queryVendorId?: number): Promise<number> {
     if (user.role === 'admin') {
       if (!queryVendorId) throw new BadRequestException('Admin must provide vendor_id query param');
       return queryVendorId;
     }
-    const [vendor] = await this.db.query('SELECT id FROM vendors WHERE user_id = $1', [user.user_id]);
+    const vendor = await this.vendorRepo.findOne({ where: { user_id: user.user_id }, select: ['id'] });
     if (!vendor) throw new ForbiddenException('Vendor profile not found');
     return vendor.id;
   }

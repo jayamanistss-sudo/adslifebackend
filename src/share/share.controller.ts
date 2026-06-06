@@ -1,9 +1,11 @@
 import { Controller, Post, Body, UseGuards, NotFoundException } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
-import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource } from 'typeorm';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { ShareEvent } from '../entities/share-event.entity';
+import { Offer } from '../entities/offer.entity';
 import { TrackShareDto } from './dto/share.dto';
 
 @ApiTags('share')
@@ -11,21 +13,22 @@ import { TrackShareDto } from './dto/share.dto';
 @UseGuards(JwtAuthGuard)
 @Controller('share')
 export class ShareController {
-  constructor(@InjectDataSource() private readonly db: DataSource) {}
+  constructor(
+    @InjectRepository(ShareEvent) private readonly shareEventRepo: Repository<ShareEvent>,
+    @InjectRepository(Offer) private readonly offerRepo: Repository<Offer>,
+  ) {}
 
   @Post('track')
   async track(@CurrentUser() user: any, @Body() dto: TrackShareDto) {
-    const [offer] = await this.db.query('SELECT id FROM offers WHERE id = $1 AND is_active = true', [dto.offer_id]);
+    const offer = await this.offerRepo.findOne({ where: { id: dto.offer_id, is_active: true }, select: ['id'] });
     if (!offer) throw new NotFoundException('Offer not found');
 
-    await this.db.query(
-      'INSERT INTO share_events (user_id, offer_id, platform) VALUES ($1, $2, $3)',
-      [user.user_id, dto.offer_id, dto.platform ?? 'general'],
-    );
-    await this.db.query(
-      'UPDATE offers SET shares = COALESCE(shares, 0) + 1 WHERE id = $1',
-      [dto.offer_id],
-    );
+    await this.shareEventRepo.save({
+      user_id: user.user_id,
+      offer_id: dto.offer_id,
+      platform: dto.platform ?? 'general',
+    });
+    await this.offerRepo.increment({ id: dto.offer_id }, 'shares', 1);
 
     return { success: true, data: { tracked: true } };
   }

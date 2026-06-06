@@ -1,12 +1,13 @@
 import { Controller, Get, Post, Body, Param, ParseIntPipe, UseGuards, ForbiddenException } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import { AbTestService } from './ab-test.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
-import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource } from 'typeorm';
+import { Vendor } from '../entities/vendor.entity';
 import { CreateAbTestDto, ConcludeAbTestDto } from './dto/ab-test.dto';
 
 @ApiTags('ab-test')
@@ -17,11 +18,11 @@ import { CreateAbTestDto, ConcludeAbTestDto } from './dto/ab-test.dto';
 export class AbTestController {
   constructor(
     private readonly abTestService: AbTestService,
-    @InjectDataSource() private readonly db: DataSource,
+    @InjectRepository(Vendor) private readonly vendorRepo: Repository<Vendor>,
   ) {}
 
   private async resolveVendorId(user: any): Promise<number> {
-    const [vendor] = await this.db.query('SELECT id FROM vendors WHERE user_id = $1', [user.user_id]);
+    const vendor = await this.vendorRepo.findOne({ where: { user_id: user.user_id }, select: ['id'] });
     if (!vendor && user.role !== 'admin') throw new ForbiddenException('Vendor profile not found');
     return vendor?.id ?? 0;
   }

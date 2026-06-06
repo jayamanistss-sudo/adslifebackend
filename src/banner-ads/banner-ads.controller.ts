@@ -1,28 +1,35 @@
-import { Controller, Get, Post, Body, Param, ParseIntPipe, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, ParseIntPipe, UseGuards, NotFoundException } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
-import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource } from 'typeorm';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Public } from '../common/decorators/public.decorator';
+import { BannerAdRequest } from '../entities/banner-ad-request.entity';
+import { Vendor } from '../entities/vendor.entity';
 import { RequestBannerAdDto, ReviewBannerAdDto } from './dto/banner-ads.dto';
 
 @ApiTags('banner-ads')
 @Controller('banner-ads')
 export class BannerAdsController {
-  constructor(@InjectDataSource() private readonly db: DataSource) {}
+  constructor(
+    @InjectRepository(BannerAdRequest) private readonly bannerRepo: Repository<BannerAdRequest>,
+    @InjectRepository(Vendor) private readonly vendorRepo: Repository<Vendor>,
+  ) {}
 
   @Public()
   @Get()
   async list() {
-    const data = await this.db.query(
-      `SELECT ba.*, v.business_name FROM banner_ad_requests ba
-       JOIN vendors v ON ba.vendor_id = v.id
-       WHERE ba.status = 'approved' AND (ba.expires_at IS NULL OR ba.expires_at > NOW())
-       ORDER BY ba.created_at DESC`,
-    );
+    const data = await this.bannerRepo
+      .createQueryBuilder('ba')
+      .select(['ba', 'v.business_name'])
+      .innerJoin(Vendor, 'v', 'ba.vendor_id = v.id')
+      .where("ba.status = 'approved'")
+      .andWhere('(ba.expires_at IS NULL OR ba.expires_at > NOW())')
+      .orderBy('ba.created_at', 'DESC')
+      .getRawMany();
     return { success: true, data };
   }
 
@@ -31,15 +38,18 @@ export class BannerAdsController {
   @Roles('vendor', 'admin')
   @Post('request')
   async request(@CurrentUser() user: any, @Body() dto: RequestBannerAdDto) {
-    const [vendor] = await this.db.query('SELECT id FROM vendors WHERE user_id = $1', [user.user_id]);
+    const vendor = await this.vendorRepo.findOne({ where: { user_id: user.user_id }, select: ['id'] });
     if (!vendor) return { success: false, error: 'Vendor not found' };
 
-    const result = await this.db.query(
-      `INSERT INTO banner_ad_requests (vendor_id, image_url, target_url, position, duration_days, status)
-       VALUES ($1, $2, $3, $4, $5, 'pending') RETURNING id`,
-      [vendor.id, dto.image_url, dto.target_url, dto.position ?? 'top', dto.duration_days ?? 7],
-    );
-    return { success: true, data: { id: result[0].id, status: 'pending' } };
+    const banner = await this.bannerRepo.save({
+      vendor_id: vendor.id,
+      image_url: dto.image_url,
+      target_url: dto.target_url ?? null,
+      position: dto.position ?? 'top',
+      duration_days: dto.duration_days ?? 7,
+      status: 'pending',
+    });
+    return { success: true, data: { id: banner.id, status: 'pending' } };
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)
@@ -47,20 +57,17 @@ export class BannerAdsController {
   @Roles('admin')
   @Post(':id/review')
   async review(@Param('id', ParseIntPipe) id: number, @Body() dto: ReviewBannerAdDto) {
+    const banner = await this.bannerRepo.findOne({ where: { id } });
+    if (!banner) throw new NotFoundException('Banner ad request not found');
+
+    const updateData: Partial<BannerAdRequest> = { status: dto.status, review_note: dto.note ?? null };
     if (dto.status === 'approved') {
-      await this.db.query(
-        `UPDATE banner_ad_requests
-         SET status = $1, review_note = $2,
-             expires_at = NOW() + (SELECT duration_days FROM banner_ad_requests WHERE id = $3) * INTERVAL '1 day'
-         WHERE id = $4`,
-        [dto.status, dto.note ?? null, id, id],
-      );
-    } else {
-      await this.db.query(
-        'UPDATE banner_ad_requests SET status = $1, review_note = $2 WHERE id = $3',
-        [dto.status, dto.note ?? null, id],
-      );
+      const days = banner.duration_days ?? 7;
+      const expires = new Date();
+      expires.setDate(expires.getDate() + days);
+      updateData.expires_at = expires;
     }
+    await this.bannerRepo.update(id, updateData);
     return { success: true, data: { updated: true } };
   }
 }

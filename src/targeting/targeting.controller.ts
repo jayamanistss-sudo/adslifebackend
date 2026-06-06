@@ -1,17 +1,20 @@
 import { Controller, Get, Post, Body, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
-import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource } from 'typeorm';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Public } from '../common/decorators/public.decorator';
+import { UserPreference } from '../entities/user-preference.entity';
 import axios from 'axios';
 import { ResolveAreaQueryDto, SetTargetingDto } from './dto/targeting.dto';
 
 @ApiTags('targeting')
 @Controller('targeting')
 export class TargetingController {
-  constructor(@InjectDataSource() private readonly db: DataSource) {}
+  constructor(
+    @InjectRepository(UserPreference) private readonly prefRepo: Repository<UserPreference>,
+  ) {}
 
   @Public()
   @Get('resolve-area')
@@ -70,20 +73,20 @@ export class TargetingController {
     const vendors = dto.preferred_vendors ?? [];
     const maxDistance = dto.max_distance_km ?? 15;
 
-    const [existing] = await this.db.query(
-      'SELECT id FROM user_preferences WHERE user_id = $1',
-      [user.user_id],
-    );
+    const existing = await this.prefRepo.findOne({ where: { user_id: user.user_id } });
     if (existing) {
-      await this.db.query(
-        'UPDATE user_preferences SET preferred_categories=$1, max_distance_km=$2, preferred_vendors=$3, updated_at=NOW() WHERE user_id=$4',
-        [JSON.stringify(categories), maxDistance, JSON.stringify(vendors), user.user_id],
-      );
+      await this.prefRepo.update(existing.id, {
+        preferred_categories: categories,
+        max_distance_km: maxDistance,
+        preferred_vendors: vendors,
+      });
     } else {
-      await this.db.query(
-        'INSERT INTO user_preferences (user_id, preferred_categories, max_distance_km, preferred_vendors) VALUES ($1,$2,$3,$4)',
-        [user.user_id, JSON.stringify(categories), maxDistance, JSON.stringify(vendors)],
-      );
+      await this.prefRepo.save({
+        user_id: user.user_id,
+        preferred_categories: categories,
+        max_distance_km: maxDistance,
+        preferred_vendors: vendors,
+      });
     }
     return { success: true, data: { updated: true } };
   }

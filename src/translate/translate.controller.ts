@@ -1,9 +1,10 @@
 import { Controller, Get, Post, Body, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
-import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource } from 'typeorm';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { Public } from '../common/decorators/public.decorator';
+import { Offer } from '../entities/offer.entity';
 import axios from 'axios';
 import { TranslateOfferDto } from './dto/translate.dto';
 
@@ -18,7 +19,9 @@ const SUPPORTED_LANGUAGES = [
 @ApiTags('translate')
 @Controller('translate')
 export class TranslateController {
-  constructor(@InjectDataSource() private readonly db: DataSource) {}
+  constructor(
+    @InjectRepository(Offer) private readonly offerRepo: Repository<Offer>,
+  ) {}
 
   @Public()
   @Get('languages')
@@ -32,10 +35,10 @@ export class TranslateController {
   async translateOffer(@Body() dto: TranslateOfferDto) {
     const targetLang = dto.target_lang ?? 'hi';
 
-    const [offer] = await this.db.query(
-      'SELECT id, title, description FROM offers WHERE id = $1',
-      [dto.offer_id],
-    );
+    const offer = await this.offerRepo.findOne({
+      where: { id: dto.offer_id },
+      select: ['id', 'title', 'description'],
+    });
     if (!offer) return { success: false, error: 'Offer not found' };
 
     const translate = async (text: string) => {

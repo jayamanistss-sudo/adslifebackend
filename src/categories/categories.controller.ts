@@ -1,24 +1,27 @@
 import { Controller, Get, Post, Put, Delete, Body, Param, ParseIntPipe, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
-import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource } from 'typeorm';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { Public } from '../common/decorators/public.decorator';
+import { Category } from '../entities/category.entity';
 import { CreateCategoryDto, UpdateCategoryDto } from './dto/categories.dto';
 
 @ApiTags('categories')
 @Controller('categories')
 export class CategoriesController {
-  constructor(@InjectDataSource() private readonly db: DataSource) {}
+  constructor(
+    @InjectRepository(Category) private readonly categoryRepo: Repository<Category>,
+  ) {}
 
   @Public()
   @Get()
   async list() {
-    const data = await this.db.query(
-      'SELECT * FROM categories ORDER BY is_active DESC, sort_order ASC, name ASC',
-    );
+    const data = await this.categoryRepo.find({
+      order: { is_active: 'DESC', sort_order: 'ASC', name: 'ASC' },
+    });
     return { success: true, data };
   }
 
@@ -27,16 +30,14 @@ export class CategoriesController {
   @Roles('admin')
   @Post()
   async create(@Body() dto: CreateCategoryDto) {
-    const result = await this.db.query(
-      'INSERT INTO categories (name, slug, icon, sort_order, is_active) VALUES ($1, $2, $3, $4, true) RETURNING id',
-      [
-        dto.name,
-        dto.slug ?? dto.name.toLowerCase().replace(/\s+/g, '-'),
-        dto.icon ?? null,
-        dto.sort_order ?? 0,
-      ],
-    );
-    return { success: true, data: { id: result[0].id } };
+    const category = await this.categoryRepo.save({
+      name: dto.name,
+      slug: dto.slug ?? dto.name.toLowerCase().replace(/\s+/g, '-'),
+      icon: dto.icon ?? null,
+      sort_order: dto.sort_order ?? 0,
+      is_active: true,
+    });
+    return { success: true, data: { id: category.id } };
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)
@@ -44,15 +45,14 @@ export class CategoriesController {
   @Roles('admin')
   @Put(':id')
   async update(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateCategoryDto) {
-    const fields = ['name', 'slug', 'icon', 'sort_order', 'is_active'] as const;
-    const updates: string[] = [];
-    const values: any[] = [];
-    for (const f of fields) {
-      if (dto[f] !== undefined) { values.push(dto[f]); updates.push(`${f} = $${values.length}`); }
-    }
-    if (!updates.length) return { success: false, error: 'Nothing to update' };
-    values.push(id);
-    await this.db.query(`UPDATE categories SET ${updates.join(', ')} WHERE id = $${values.length}`, values);
+    const updateData: Partial<Category> = {};
+    if (dto.name       !== undefined) updateData.name       = dto.name;
+    if (dto.slug       !== undefined) updateData.slug       = dto.slug;
+    if (dto.icon       !== undefined) updateData.icon       = dto.icon;
+    if (dto.sort_order !== undefined) updateData.sort_order = dto.sort_order;
+    if (dto.is_active  !== undefined) updateData.is_active  = Boolean(dto.is_active);
+    if (!Object.keys(updateData).length) return { success: false, error: 'Nothing to update' };
+    await this.categoryRepo.update(id, updateData);
     return { success: true, data: { updated: true } };
   }
 
@@ -61,7 +61,7 @@ export class CategoriesController {
   @Roles('admin')
   @Delete(':id')
   async remove(@Param('id', ParseIntPipe) id: number) {
-    await this.db.query('UPDATE categories SET is_active = false WHERE id = $1', [id]);
+    await this.categoryRepo.update(id, { is_active: false });
     return { success: true, data: { deleted: true } };
   }
 }

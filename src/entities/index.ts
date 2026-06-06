@@ -28,6 +28,10 @@ export { ErrorLog } from './error-log.entity';
 export { SecurityEvent } from './security-event.entity';
 export { AlertLog } from './alert-log.entity';
 export { BlockedIp } from './blocked-ip.entity';
+export { BannerAdRequest } from './banner-ad-request.entity';
+export { Leaderboard } from './leaderboard.entity';
+export { ShareEvent } from './share-event.entity';
+export { SpotlightRequest } from './spotlight-request.entity';
 
 import { User } from './user.entity';
 import { Vendor } from './vendor.entity';
@@ -59,6 +63,10 @@ import { ErrorLog } from './error-log.entity';
 import { SecurityEvent } from './security-event.entity';
 import { AlertLog } from './alert-log.entity';
 import { BlockedIp } from './blocked-ip.entity';
+import { BannerAdRequest } from './banner-ad-request.entity';
+import { Leaderboard } from './leaderboard.entity';
+import { ShareEvent } from './share-event.entity';
+import { SpotlightRequest } from './spotlight-request.entity';
 
 export const entities = [
   User,
@@ -91,4 +99,8 @@ export const entities = [
   SecurityEvent,
   AlertLog,
   BlockedIp,
+  BannerAdRequest,
+  Leaderboard,
+  ShareEvent,
+  SpotlightRequest,
 ];
