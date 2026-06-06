@@ -24,6 +24,11 @@ async function bootstrap() {
   // Serve uploaded vendor images
   app.useStaticAssets(join(process.cwd(), 'uploads'), { prefix: '/uploads' });
 
+  // Shortcut routes for static pages (before API prefix)
+  const expressApp = app.getHttpAdapter().getInstance();
+  expressApp.get('/monitor', (_req: any, res: any) => res.sendFile(join(process.cwd(), 'public', 'monitoring.html')));
+  expressApp.get('/swagger', (_req: any, res: any) => res.redirect('/docs'));
+
   app.enableCors({
     origin: (origin, callback) => {
       const allowed = new Set([
