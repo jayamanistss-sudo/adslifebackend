@@ -6,6 +6,7 @@ import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { OffersService } from './offers.service';
 import { CreateOfferDto, UpdateOfferDto } from './dto/create-offer.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { OptionalJwtAuthGuard } from '../common/guards/optional-jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -18,10 +19,10 @@ import { Public } from '../common/decorators/public.decorator';
 export class OffersController {
   constructor(private readonly offersService: OffersService) {}
 
-  @Public()
+  @UseGuards(OptionalJwtAuthGuard)
   @Get(':id')
-  async detail(@Param('id', ParseIntPipe) id: number) {
-    const data = await this.offersService.detail(id);
+  async detail(@CurrentUser() user: any, @Param('id', ParseIntPipe) id: number) {
+    const data = await this.offersService.detail(id, user?.role);
     return { success: true, data };
   }
 

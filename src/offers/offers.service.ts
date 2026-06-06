@@ -128,12 +128,12 @@ export class OffersService {
       if (offer.vendor_id !== vendorId) throw new ForbiddenException('Access denied');
     }
 
-    await this.offerRepo.delete({ id: offerId });
+    await this.offerRepo.update(offerId, { is_active: false });
     return { deleted: true };
   }
 
-  async detail(offerId: number) {
-    const offer = await this.offerRepo
+  async detail(offerId: number, role?: string) {
+    const qb = this.offerRepo
       .createQueryBuilder('o')
       .innerJoin('vendors', 'v', 'v.id = o.vendor_id')
       .select([
@@ -168,9 +168,13 @@ export class OffersService {
         'v.category AS "vendorCategory"',
         'v.description AS "vendorDescription"',
       ])
-      .where('o.id = :id', { id: offerId })
-      .getRawOne();
+      .where('o.id = :id', { id: offerId });
 
+    if (role !== 'admin') {
+      qb.andWhere('o.is_active = true');
+    }
+
+    const offer = await qb.getRawOne();
     if (!offer) throw new NotFoundException('Offer not found');
     const toNum = (v: any) => (v == null ? null : Number.parseFloat(v));
     return {

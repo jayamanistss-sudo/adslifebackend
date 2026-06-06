@@ -3,9 +3,10 @@ import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { OptionalJwtAuthGuard } from '../common/guards/optional-jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
-import { Public } from '../common/decorators/public.decorator';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Category } from '../entities/category.entity';
 import { CreateCategoryDto, UpdateCategoryDto } from './dto/categories.dto';
 
@@ -16,11 +17,13 @@ export class CategoriesController {
     @InjectRepository(Category) private readonly categoryRepo: Repository<Category>,
   ) {}
 
-  @Public()
+  @UseGuards(OptionalJwtAuthGuard)
   @Get()
-  async list() {
+  async list(@CurrentUser() user: any) {
+    const isAdmin = user?.role === 'admin';
     const data = await this.categoryRepo.find({
-      order: { is_active: 'DESC', sort_order: 'ASC', name: 'ASC' },
+      where: isAdmin ? {} : { is_active: true },
+      order: { sort_order: 'ASC', name: 'ASC' },
     });
     return { success: true, data };
   }
