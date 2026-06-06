@@ -36,7 +36,7 @@ export class SpotlightController {
     const isAdmin = user.role === 'admin';
     let rows: any[];
     if (isAdmin) {
-      const cond = status ? 'WHERE sr.status = ?' : '';
+      const cond = status ? 'WHERE sr.status = $1' : '';
       rows = await this.db.query(
         `SELECT sr.*, v.business_name, v.city, u.email as vendor_email, v.subscription_plan
          FROM spotlight_requests sr
@@ -49,7 +49,7 @@ export class SpotlightController {
       rows = await this.db.query(
         `SELECT sr.* FROM spotlight_requests sr
          JOIN vendors v ON sr.vendor_id = v.id
-         WHERE v.user_id = ? ORDER BY sr.created_at DESC`,
+         WHERE v.user_id = $1 ORDER BY sr.created_at DESC`,
         [user.user_id],
       );
     }
@@ -61,15 +61,15 @@ export class SpotlightController {
   @Roles('vendor', 'admin')
   @Post('request')
   async request(@CurrentUser() user: any, @Body() dto: RequestSpotlightDto) {
-    const [vendor] = await this.db.query('SELECT id FROM vendors WHERE user_id = ?', [user.user_id]);
+    const [vendor] = await this.db.query('SELECT id FROM vendors WHERE user_id = $1', [user.user_id]);
     if (!vendor) return { success: false, error: 'Vendor not found' };
 
     const result = await this.db.query(
       `INSERT INTO spotlight_requests (vendor_id, offer_id, message, duration_days, status)
-       VALUES (?, ?, ?, ?, 'pending')`,
+       VALUES ($1, $2, $3, $4, 'pending') RETURNING id`,
       [vendor.id, dto.offer_id ?? null, dto.message ?? null, dto.duration_days ?? 7],
     );
-    return { success: true, data: { id: result.insertId, status: 'pending' } };
+    return { success: true, data: { id: result[0].id, status: 'pending' } };
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)
@@ -80,12 +80,12 @@ export class SpotlightController {
     if (dto.status === 'approved') {
       await this.db.query(
         `UPDATE spotlight_requests
-         SET status = 'approved', starts_at = NOW(), ends_at = DATE_ADD(NOW(), INTERVAL ? DAY)
-         WHERE id = ?`,
+         SET status = 'approved', starts_at = NOW(), ends_at = NOW() + ($1 * INTERVAL '1 day')
+         WHERE id = $2`,
         [dto.duration_days ?? 7, id],
       );
     } else {
-      await this.db.query('UPDATE spotlight_requests SET status = ? WHERE id = ?', [dto.status, id]);
+      await this.db.query('UPDATE spotlight_requests SET status = $1 WHERE id = $2', [dto.status, id]);
     }
     return { success: true, data: { updated: true } };
   }

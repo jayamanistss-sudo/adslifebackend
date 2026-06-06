@@ -28,7 +28,7 @@ export class CategoriesController {
   @Post()
   async create(@Body() dto: CreateCategoryDto) {
     const result = await this.db.query(
-      'INSERT INTO categories (name, slug, icon, sort_order, is_active) VALUES (?, ?, ?, ?, 1)',
+      'INSERT INTO categories (name, slug, icon, sort_order, is_active) VALUES ($1, $2, $3, $4, true) RETURNING id',
       [
         dto.name,
         dto.slug ?? dto.name.toLowerCase().replace(/\s+/g, '-'),
@@ -36,7 +36,7 @@ export class CategoriesController {
         dto.sort_order ?? 0,
       ],
     );
-    return { success: true, data: { id: result.insertId } };
+    return { success: true, data: { id: result[0].id } };
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)
@@ -48,11 +48,11 @@ export class CategoriesController {
     const updates: string[] = [];
     const values: any[] = [];
     for (const f of fields) {
-      if (dto[f] !== undefined) { updates.push(`${f} = ?`); values.push(dto[f]); }
+      if (dto[f] !== undefined) { values.push(dto[f]); updates.push(`${f} = $${values.length}`); }
     }
     if (!updates.length) return { success: false, error: 'Nothing to update' };
     values.push(id);
-    await this.db.query(`UPDATE categories SET ${updates.join(', ')} WHERE id = ?`, values);
+    await this.db.query(`UPDATE categories SET ${updates.join(', ')} WHERE id = $${values.length}`, values);
     return { success: true, data: { updated: true } };
   }
 
@@ -61,7 +61,7 @@ export class CategoriesController {
   @Roles('admin')
   @Delete(':id')
   async remove(@Param('id', ParseIntPipe) id: number) {
-    await this.db.query('UPDATE categories SET is_active = 0 WHERE id = ?', [id]);
+    await this.db.query('UPDATE categories SET is_active = false WHERE id = $1', [id]);
     return { success: true, data: { deleted: true } };
   }
 }

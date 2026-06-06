@@ -42,7 +42,11 @@ export class PaymentController {
     @Headers('x-webhook-timestamp') timestamp: string = '',
     @Headers('x-webhook-signature') signature: string = '',
   ) {
-    const rawBody = JSON.stringify(req.body);
+    // req.body is a raw Buffer here because of the express.raw() middleware
+    // applied to this route in main.ts — use it directly for accurate HMAC
+    const rawBody = Buffer.isBuffer(req.body)
+      ? req.body.toString('utf8')
+      : JSON.stringify(req.body);
     return this.paymentService.handleWebhook(rawBody, timestamp, signature);
   }
 }

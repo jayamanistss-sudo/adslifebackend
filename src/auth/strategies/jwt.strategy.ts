@@ -22,7 +22,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     if (!payload?.user_id) throw new UnauthorizedException();
 
     const [user] = await this.db.query(
-      'SELECT is_active, token_invalidated_at FROM users WHERE id = ?',
+      'SELECT is_active, token_invalidated_at FROM users WHERE id = $1',
       [payload.user_id],
     );
 

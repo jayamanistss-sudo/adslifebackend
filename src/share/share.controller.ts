@@ -15,15 +15,15 @@ export class ShareController {
 
   @Post('track')
   async track(@CurrentUser() user: any, @Body() dto: TrackShareDto) {
-    const [offer] = await this.db.query('SELECT id FROM offers WHERE id = ? AND is_active = 1', [dto.offer_id]);
+    const [offer] = await this.db.query('SELECT id FROM offers WHERE id = $1 AND is_active = true', [dto.offer_id]);
     if (!offer) throw new NotFoundException('Offer not found');
 
     await this.db.query(
-      'INSERT INTO share_events (user_id, offer_id, platform) VALUES (?, ?, ?)',
+      'INSERT INTO share_events (user_id, offer_id, platform) VALUES ($1, $2, $3)',
       [user.user_id, dto.offer_id, dto.platform ?? 'general'],
     );
     await this.db.query(
-      'UPDATE offers SET shares = COALESCE(shares, 0) + 1 WHERE id = ?',
+      'UPDATE offers SET shares = COALESCE(shares, 0) + 1 WHERE id = $1',
       [dto.offer_id],
     );
 

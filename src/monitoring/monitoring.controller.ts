@@ -1,5 +1,5 @@
 import {
-  Controller, Get, Post, Delete, Body, Param, Query,
+  Controller, Get, Post, Put, Delete, Body, Param, Query,
   ParseIntPipe, UseGuards, Res, HttpCode, HttpStatus,
 } from '@nestjs/common';
 import type { Response } from 'express';
@@ -62,6 +62,13 @@ export class MonitoringController {
   @Get('alerts')
   async alerts(@Query() q: MonitoringQueryDto) {
     const data = await this.monitoring.getAlerts(q);
+    return { success: true, data };
+  }
+
+  @Put('alerts/:id/read')
+  @HttpCode(HttpStatus.OK)
+  async markAlertRead(@Param('id', ParseIntPipe) id: number) {
+    const data = await this.monitoring.markAlertRead(id);
     return { success: true, data };
   }
 

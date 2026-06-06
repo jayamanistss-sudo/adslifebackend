@@ -14,42 +14,44 @@ export class ReferralService {
   }
 
   async ensureCode(userId: number): Promise<string> {
-    const [user] = await this.db.query('SELECT referral_code FROM users WHERE id = ?', [userId]);
+    const [user] = await this.db.query('SELECT referral_code FROM users WHERE id = $1', [userId]);
     if (user?.referral_code) return user.referral_code;
     let code: string;
     let attempts = 0;
     do {
       code = this.generateCode();
-      const [existing] = await this.db.query('SELECT id FROM users WHERE referral_code = ?', [code]);
+      const [existing] = await this.db.query('SELECT id FROM users WHERE referral_code = $1', [code]);
       if (!existing) break;
     } while (++attempts < 10);
-    await this.db.query('UPDATE users SET referral_code = ? WHERE id = ?', [code, userId]);
+    await this.db.query('UPDATE users SET referral_code = $1 WHERE id = $2', [code, userId]);
     return code;
   }
 
   async getMyReferral(userId: number) {
     const code = await this.ensureCode(userId);
-    const [{ coins }] = await this.db.query('SELECT coins FROM users WHERE id = ?', [userId]);
+    const [{ coins }] = await this.db.query('SELECT coins FROM users WHERE id = $1', [userId]);
     const [{ count }] = await this.db.query(
-      'SELECT COUNT(*) as count FROM referrals WHERE referrer_id = ?', [userId],
+      'SELECT COUNT(*) as count FROM referrals WHERE referrer_id = $1', [userId],
     );
     return { referral_code: code, coins: +coins, referral_count: +count };
   }
 
   async applyReferral(referredUserId: number, code: string) {
     const [referrer] = await this.db.query(
-      'SELECT id FROM users WHERE referral_code = ? AND id != ?', [code, referredUserId],
+      'SELECT id FROM users WHERE referral_code = $1 AND id != $2', [code, referredUserId],
     );
     if (!referrer) return;
     const [already] = await this.db.query(
-      'SELECT id FROM referrals WHERE referred_id = ?', [referredUserId],
+      'SELECT id FROM referrals WHERE referred_id = $1', [referredUserId],
     );
     if (already) return;
-    await this.db.query(
-      'INSERT INTO referrals (referrer_id, referred_id, coins_awarded) VALUES (?, ?, 50)',
-      [referrer.id, referredUserId],
-    );
-    await this.db.query('UPDATE users SET coins = coins + 50 WHERE id = ?', [referrer.id]);
-    await this.db.query('UPDATE users SET coins = coins + 20 WHERE id = ?', [referredUserId]);
+    await this.db.transaction(async (manager) => {
+      await manager.query(
+        'INSERT INTO referrals (referrer_id, referred_id, coins_awarded) VALUES ($1, $2, 50)',
+        [referrer.id, referredUserId],
+      );
+      await manager.query('UPDATE users SET coins = coins + 50 WHERE id = $1', [referrer.id]);
+      await manager.query('UPDATE users SET coins = coins + 20 WHERE id = $1', [referredUserId]);
+    });
   }
 }

@@ -2,10 +2,15 @@ import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { ReferralModule } from '../referral/referral.module';
+import { User } from '../entities/user.entity';
+import { Vendor } from '../entities/vendor.entity';
+import { UserPreference } from '../entities/user-preference.entity';
+import { PasswordReset } from '../entities/password-reset.entity';
 
 @Module({
   imports: [
@@ -20,6 +25,7 @@ import { ReferralModule } from '../referral/referral.module';
         },
       }),
     }),
+    TypeOrmModule.forFeature([User, Vendor, UserPreference, PasswordReset]),
     ReferralModule,
   ],
   controllers: [AuthController],

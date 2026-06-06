@@ -107,28 +107,17 @@ export class BroadcastDto {
 }
 
 export class SiteSettingsDto {
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsString()
-  app_name?: string;
-
-  @ApiPropertyOptional({ enum: ['0', '1'] })
-  @IsOptional()
-  @IsIn(['0', '1'])
-  maintenance_mode?: string;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsString()
-  min_app_version?: string;
-
-  @ApiPropertyOptional({ enum: ['0', '1'] })
-  @IsOptional()
-  @IsIn(['0', '1'])
-  coins_enabled?: string;
-
-  @ApiPropertyOptional({ enum: ['0', '1'] })
-  @IsOptional()
-  @IsIn(['0', '1'])
-  spin_enabled?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() app_name?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() site_name?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() site_tagline?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() site_logo_url?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() seo_title?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() seo_description?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() seo_keywords?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() contact_email?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() contact_phone?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() min_app_version?: string;
+  @ApiPropertyOptional({ enum: ['0', '1'] }) @IsOptional() @IsIn(['0', '1']) maintenance_mode?: string;
+  @ApiPropertyOptional({ enum: ['0', '1'] }) @IsOptional() @IsIn(['0', '1']) coins_enabled?: string;
+  @ApiPropertyOptional({ enum: ['0', '1'] }) @IsOptional() @IsIn(['0', '1']) spin_enabled?: string;
 }

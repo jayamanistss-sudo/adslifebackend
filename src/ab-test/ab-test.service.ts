@@ -4,7 +4,7 @@ import { DataSource } from 'typeorm';
 
 @Injectable()
 export class AbTestService {
-  constructor(@InjectDataSource() private db: DataSource) {}
+  constructor(@InjectDataSource() private readonly db: DataSource) {}
 
   async create(vendorId: number, dto: {
     name: string; offer_id_a: number; offer_id_b: number; duration_days?: number;
@@ -12,22 +12,23 @@ export class AbTestService {
     const durationDays = dto.duration_days ?? 7;
     const result = await this.db.query(
       `INSERT INTO ab_tests (vendor_id, name, offer_id_a, offer_id_b, status, ends_at)
-       VALUES (?, ?, ?, ?, 'running', DATE_ADD(NOW(), INTERVAL ? DAY))`,
+       VALUES ($1, $2, $3, $4, 'running', NOW() + ($5 * INTERVAL '1 day'))
+       RETURNING id`,
       [vendorId, dto.name, dto.offer_id_a, dto.offer_id_b, durationDays],
     );
-    return { id: result.insertId };
+    return { id: result[0].id };
   }
 
   async results(testId: number, vendorId: number, role: string) {
-    const [test] = await this.db.query('SELECT * FROM ab_tests WHERE id = ?', [testId]);
+    const [test] = await this.db.query('SELECT * FROM ab_tests WHERE id = $1', [testId]);
     if (!test) throw new NotFoundException('A/B test not found');
     if (role !== 'admin' && test.vendor_id !== vendorId) throw new ForbiddenException('Access denied');
 
     const statsFor = async (offerId: number) => {
       const [[views], [clicks], [saves]] = await Promise.all([
-        this.db.query('SELECT COUNT(*) as cnt FROM user_interactions WHERE offer_id = ? AND action = "view" AND created_at >= ?', [offerId, test.created_at]),
-        this.db.query('SELECT COUNT(*) as cnt FROM user_interactions WHERE offer_id = ? AND action = "click" AND created_at >= ?', [offerId, test.created_at]),
-        this.db.query('SELECT COUNT(*) as cnt FROM user_interactions WHERE offer_id = ? AND action = "save" AND created_at >= ?', [offerId, test.created_at]),
+        this.db.query('SELECT COUNT(*) as cnt FROM user_interactions WHERE offer_id = $1 AND action = \'view\' AND created_at >= $2', [offerId, test.created_at]),
+        this.db.query('SELECT COUNT(*) as cnt FROM user_interactions WHERE offer_id = $1 AND action = \'click\' AND created_at >= $2', [offerId, test.created_at]),
+        this.db.query('SELECT COUNT(*) as cnt FROM user_interactions WHERE offer_id = $1 AND action = \'save\' AND created_at >= $2', [offerId, test.created_at]),
       ]);
       const v = +views.cnt, c = +clicks.cnt, s = +saves.cnt;
       return { views: v, clicks: c, saves: s, ctr: v > 0 ? Math.round((c / v) * 10000) / 100 : 0 };
@@ -43,7 +44,7 @@ export class AbTestService {
   }
 
   async conclude(testId: number, winnerVariant: 'A' | 'B', vendorId: number, role: string) {
-    const [test] = await this.db.query('SELECT * FROM ab_tests WHERE id = ?', [testId]);
+    const [test] = await this.db.query('SELECT * FROM ab_tests WHERE id = $1', [testId]);
     if (!test) throw new NotFoundException('A/B test not found');
     if (role !== 'admin' && test.vendor_id !== vendorId) throw new ForbiddenException('Access denied');
     if (test.status !== 'running') throw new BadRequestException('Test is not running');
@@ -52,10 +53,10 @@ export class AbTestService {
     const loserOfferId = winnerVariant === 'A' ? test.offer_id_b : test.offer_id_a;
 
     await this.db.query(
-      'UPDATE ab_tests SET status = "concluded", winner_offer_id = ?, concluded_at = NOW() WHERE id = ?',
+      'UPDATE ab_tests SET status = \'concluded\', winner_offer_id = $1, concluded_at = NOW() WHERE id = $2',
       [winnerOfferId, testId],
     );
-    await this.db.query('UPDATE offers SET is_active = 0 WHERE id = ?', [loserOfferId]);
+    await this.db.query('UPDATE offers SET is_active = false WHERE id = $1', [loserOfferId]);
 
     return { concluded: true, winner_offer_id: winnerOfferId };
   }

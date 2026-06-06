@@ -19,9 +19,9 @@ export class LeaderboardController {
     const period = query.period ?? 'monthly';
     const limit = Math.min(query.limit ?? 50, 100);
     const params: any[] = [period];
-    let sql = 'SELECT l.*, u.name, u.avatar_url, u.city as user_city FROM leaderboard l JOIN users u ON l.user_id = u.id WHERE l.period = ?';
-    if (query.city) { sql += ' AND l.city = ?'; params.push(query.city); }
-    sql += ' ORDER BY l.score DESC LIMIT ?';
+    let sql = 'SELECT l.*, u.name, u.avatar_url, u.city as user_city FROM leaderboard l JOIN users u ON l.user_id = u.id WHERE l.period = $1';
+    if (query.city) { sql += ` AND l.city = $${params.length + 1}`; params.push(query.city); }
+    sql += ` ORDER BY l.score DESC LIMIT $${params.length + 1}`;
     params.push(limit);
 
     const rows = await this.db.query(sql, params);
@@ -37,10 +37,12 @@ export class LeaderboardController {
     await this.db.query(`
       INSERT INTO leaderboard (user_id, period, score, city)
       SELECT u.id, 'monthly',
-             COALESCE((SELECT COUNT(*) FROM saved_offers so WHERE so.user_id = u.id AND MONTH(so.created_at) = MONTH(NOW()) AND YEAR(so.created_at) = YEAR(NOW())), 0),
+             COALESCE((SELECT COUNT(*) FROM saved_offers so WHERE so.user_id = u.id
+               AND EXTRACT(MONTH FROM so.created_at) = EXTRACT(MONTH FROM NOW())
+               AND EXTRACT(YEAR FROM so.created_at) = EXTRACT(YEAR FROM NOW())), 0),
              u.city
       FROM users u
-      ON DUPLICATE KEY UPDATE score = VALUES(score)
+      ON CONFLICT (user_id, period) DO UPDATE SET score = EXCLUDED.score
     `);
     return { success: true, data: { rebuilt: true } };
   }

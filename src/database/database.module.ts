@@ -1,6 +1,8 @@
-import { Module, Global } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
+import { Module, Global, OnModuleInit, Logger } from '@nestjs/common';
+import { TypeOrmModule, InjectDataSource } from '@nestjs/typeorm';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { DataSource } from 'typeorm';
+import { entities } from '../entities';
 
 @Global()
 @Module({
@@ -9,16 +11,14 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
       imports: [ConfigModule],
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
-        type: 'mysql',
+        type: 'postgres',
         host: config.get('database.host'),
         port: config.get<number>('database.port'),
         database: config.get('database.name'),
         username: config.get('database.user'),
         password: config.get('database.pass'),
-        entities: [],
+        entities: entities,
         synchronize: false,
-        charset: 'utf8mb4',
-        timezone: '+00:00',
         extra: {
           connectionLimit: 10,
         },
@@ -27,4 +27,17 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
   ],
   exports: [TypeOrmModule],
 })
-export class DatabaseModule {}
+export class DatabaseModule implements OnModuleInit {
+  private readonly logger = new Logger(DatabaseModule.name);
+
+  constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
+
+  async onModuleInit() {
+    try {
+      await this.dataSource.query('CREATE EXTENSION IF NOT EXISTS fuzzystrmatch');
+      this.logger.log('PostgreSQL fuzzystrmatch extension ensured');
+    } catch (err: any) {
+      this.logger.warn(`Could not create fuzzystrmatch extension: ${err?.message}`);
+    }
+  }
+}

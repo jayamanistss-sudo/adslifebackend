@@ -31,7 +31,7 @@ export class AuthService {
 
   async login(dto: LoginDto, ctx?: { ip: string; ua: string; requestId?: string }) {
     const [user] = await this.db.query(
-      'SELECT id, name, email, password_hash, role, city, lat, lng, avatar_url FROM users WHERE email = ? AND is_active = 1',
+      'SELECT id, name, email, password_hash, role, city, lat, lng, avatar_url FROM users WHERE email = $1 AND is_active = true',
       [dto.email.trim()],
     );
     if (!user?.password_hash) {
@@ -54,7 +54,7 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
     await this.db.query(
-      'UPDATE users SET last_login = CURDATE(), login_count = login_count + 1 WHERE id = ?',
+      'UPDATE users SET last_login = CURRENT_DATE, login_count = login_count + 1 WHERE id = $1',
       [user.id],
     );
     setImmediate(() => this.monitoring.logAuth({
@@ -71,7 +71,7 @@ export class AuthService {
     if (!dto.name || !dto.email || !dto.password) {
       throw new BadRequestException('Name, email and password are required');
     }
-    const [existing] = await this.db.query('SELECT id FROM users WHERE email = ?', [dto.email]);
+    const [existing] = await this.db.query('SELECT id FROM users WHERE email = $1', [dto.email]);
     if (existing) throw new ConflictException('Email already registered');
 
     const hash = await bcrypt.hash(dto.password, 10);
@@ -79,12 +79,12 @@ export class AuthService {
 
     const userId: number = await this.db.transaction(async (manager) => {
       const result = await manager.query(
-        'INSERT INTO users (name, email, phone, password_hash, city, role) VALUES (?, ?, ?, ?, ?, ?)',
+        'INSERT INTO users (name, email, phone, password_hash, city, role) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id',
         [dto.name.trim(), dto.email.trim(), dto.phone?.trim() || null, hash, dto.city?.trim() || null, role],
       );
-      const newId: number = result.insertId;
+      const newId: number = result[0].id;
       await manager.query(
-        'INSERT IGNORE INTO user_preferences (user_id, preferred_categories, preferred_vendors) VALUES (?, ?, ?)',
+        'INSERT INTO user_preferences (user_id, preferred_categories, preferred_vendors) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING',
         [newId, '[]', '[]'],
       );
       return newId;
@@ -116,7 +116,7 @@ export class AuthService {
     }
 
     const [existing] = await this.db.query(
-      'SELECT id, name, email, role, avatar_url FROM users WHERE email = ?',
+      'SELECT id, name, email, role, avatar_url FROM users WHERE email = $1',
       [profile.email],
     );
 
@@ -127,24 +127,24 @@ export class AuthService {
       userId = existing.id;
       role = existing.role;
       await this.db.query(
-        'UPDATE users SET last_login = CURDATE(), login_count = login_count + 1, avatar_url = COALESCE(avatar_url, ?) WHERE id = ?',
+        'UPDATE users SET last_login = CURRENT_DATE, login_count = login_count + 1, avatar_url = COALESCE(avatar_url, $1) WHERE id = $2',
         [profile.picture || null, userId],
       );
     } else {
       const result = await this.db.query(
-        'INSERT INTO users (name, email, avatar_url, role, google_id) VALUES (?, ?, ?, "user", ?)',
+        'INSERT INTO users (name, email, avatar_url, role, google_id) VALUES ($1, $2, $3, \'user\', $4) RETURNING id',
         [profile.name || profile.email, profile.email, profile.picture || null, profile.sub || null],
       );
-      userId = result.insertId;
+      userId = result[0].id;
       await this.db.query(
-        'INSERT IGNORE INTO user_preferences (user_id, preferred_categories, preferred_vendors) VALUES (?, ?, ?)',
+        'INSERT INTO user_preferences (user_id, preferred_categories, preferred_vendors) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING',
         [userId, '[]', '[]'],
       );
     }
 
     const token = this.generateToken(userId, role);
     const [user] = await this.db.query(
-      'SELECT id, name, email, role, avatar_url FROM users WHERE id = ?',
+      'SELECT id, name, email, role, avatar_url FROM users WHERE id = $1',
       [userId],
     );
     return { user, token };
@@ -153,20 +153,20 @@ export class AuthService {
   async becomeVendor(userId: number, userRole: string, dto: BecomeVendorDto) {
     if (userRole === 'admin') throw new ForbiddenException('Admins cannot create vendor profiles');
 
-    const [existing] = await this.db.query('SELECT id FROM vendors WHERE user_id = ?', [userId]);
+    const [existing] = await this.db.query('SELECT id FROM vendors WHERE user_id = $1', [userId]);
     if (existing) throw new ConflictException('Already a vendor');
 
     await this.db.query(
-      'INSERT INTO vendors (user_id, business_name, category, city, phone, status) VALUES (?, ?, ?, ?, ?, "pending_review")',
+      'INSERT INTO vendors (user_id, business_name, category, city, phone, status) VALUES ($1, $2, $3, $4, $5, \'pending_review\')',
       [userId, dto.business_name, dto.category || null, dto.city || null, dto.phone || null],
     );
-    await this.db.query('UPDATE users SET role = "vendor" WHERE id = ?', [userId]);
+    await this.db.query('UPDATE users SET role = \'vendor\' WHERE id = $1', [userId]);
     return { message: 'Vendor application submitted for review' };
   }
 
   async forgotPassword(email: string) {
     const [user] = await this.db.query(
-      'SELECT id FROM users WHERE email = ? AND is_active = 1',
+      'SELECT id FROM users WHERE email = $1 AND is_active = true',
       [email.trim().toLowerCase()],
     );
     // Always return success to prevent email enumeration
@@ -174,14 +174,14 @@ export class AuthService {
 
     // Invalidate any previous unused tokens
     await this.db.query(
-      'UPDATE password_resets SET used_at = NOW() WHERE user_id = ? AND used_at IS NULL',
+      'UPDATE password_resets SET used_at = NOW() WHERE user_id = $1 AND used_at IS NULL',
       [user.id],
     );
 
     const token = crypto.randomBytes(32).toString('hex');
     const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
     await this.db.query(
-      'INSERT INTO password_resets (user_id, token, expires_at) VALUES (?, ?, ?)',
+      'INSERT INTO password_resets (user_id, token, expires_at) VALUES ($1, $2, $3)',
       [user.id, token, expiresAt],
     );
 
@@ -201,7 +201,7 @@ export class AuthService {
       throw new BadRequestException('Token and new password (min 6 chars) are required');
     }
     const [reset] = await this.db.query(
-      'SELECT * FROM password_resets WHERE token = ? AND used_at IS NULL AND expires_at > NOW()',
+      'SELECT * FROM password_resets WHERE token = $1 AND used_at IS NULL AND expires_at > NOW()',
       [token],
     );
     if (!reset) throw new BadRequestException('Invalid or expired reset token');
@@ -209,10 +209,10 @@ export class AuthService {
     const hash = await bcrypt.hash(newPassword, 10);
     await this.db.transaction(async (manager) => {
       await manager.query(
-        'UPDATE users SET password_hash = ?, token_invalidated_at = ? WHERE id = ?',
+        'UPDATE users SET password_hash = $1, token_invalidated_at = $2 WHERE id = $3',
         [hash, Date.now(), reset.user_id],
       );
-      await manager.query('UPDATE password_resets SET used_at = NOW() WHERE id = ?', [reset.id]);
+      await manager.query('UPDATE password_resets SET used_at = NOW() WHERE id = $1', [reset.id]);
     });
     return { message: 'Password reset successful. Please log in again.' };
   }
@@ -222,13 +222,13 @@ export class AuthService {
     const fields: string[] = [];
     const values: any[] = [];
     for (const key of allowed) {
-      if (dto[key] !== undefined) { fields.push(`${key} = ?`); values.push(dto[key]); }
+      if (dto[key] !== undefined) { fields.push(`${key} = $${values.length + 1}`); values.push(dto[key]); }
     }
     if (!fields.length) return { updated: false };
     values.push(userId);
-    await this.db.query(`UPDATE users SET ${fields.join(', ')} WHERE id = ?`, values);
+    await this.db.query(`UPDATE users SET ${fields.join(', ')} WHERE id = $${values.length}`, values);
     const [user] = await this.db.query(
-      'SELECT id, name, email, phone, city, avatar_url, role FROM users WHERE id = ?',
+      'SELECT id, name, email, phone, city, avatar_url, role FROM users WHERE id = $1',
       [userId],
     );
     return user;
@@ -238,7 +238,7 @@ export class AuthService {
     if (!newPassword || newPassword.length < 6) {
       throw new BadRequestException('New password must be at least 6 characters');
     }
-    const [user] = await this.db.query('SELECT id, password_hash FROM users WHERE id = ?', [userId]);
+    const [user] = await this.db.query('SELECT id, password_hash FROM users WHERE id = $1', [userId]);
     if (!user?.password_hash) {
       throw new BadRequestException('This account uses social login — use forgot-password to set a password');
     }
@@ -247,15 +247,15 @@ export class AuthService {
     }
     const hash = await bcrypt.hash(newPassword, 10);
     await this.db.query(
-      'UPDATE users SET password_hash = ?, token_invalidated_at = ? WHERE id = ?',
+      'UPDATE users SET password_hash = $1, token_invalidated_at = $2 WHERE id = $3',
       [hash, Date.now(), userId],
     );
     return { message: 'Password changed successfully. Please log in again.' };
   }
 
   async logout(userId: number, ctx?: { ip: string; ua: string; requestId?: string }) {
-    const [user] = await this.db.query('SELECT email, role FROM users WHERE id = ?', [userId]);
-    await this.db.query('UPDATE users SET token_invalidated_at = ? WHERE id = ?', [Date.now(), userId]);
+    const [user] = await this.db.query('SELECT email, role FROM users WHERE id = $1', [userId]);
+    await this.db.query('UPDATE users SET token_invalidated_at = $1 WHERE id = $2', [Date.now(), userId]);
     setImmediate(() => this.monitoring.logAuth({
       requestId: ctx?.requestId, userId, email: user?.email, role: user?.role,
       action: 'logout', ipAddress: ctx?.ip ?? '0.0.0.0', userAgent: ctx?.ua,

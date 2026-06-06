@@ -29,7 +29,7 @@ export class AnalyticsController {
       if (!queryVendorId) throw new BadRequestException('Admin must provide vendor_id query param');
       return queryVendorId;
     }
-    const [vendor] = await this.db.query('SELECT id FROM vendors WHERE user_id = ?', [user.user_id]);
+    const [vendor] = await this.db.query('SELECT id FROM vendors WHERE user_id = $1', [user.user_id]);
     if (!vendor) throw new ForbiddenException('Vendor profile not found');
     return vendor.id;
   }

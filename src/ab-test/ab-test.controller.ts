@@ -21,7 +21,7 @@ export class AbTestController {
   ) {}
 
   private async resolveVendorId(user: any): Promise<number> {
-    const [vendor] = await this.db.query('SELECT id FROM vendors WHERE user_id = ?', [user.user_id]);
+    const [vendor] = await this.db.query('SELECT id FROM vendors WHERE user_id = $1', [user.user_id]);
     if (!vendor && user.role !== 'admin') throw new ForbiddenException('Vendor profile not found');
     return vendor?.id ?? 0;
   }

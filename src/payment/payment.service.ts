@@ -7,14 +7,14 @@ import { DataSource } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 import { PushService } from '../services/push.service';
 import axios from 'axios';
-import * as crypto from 'crypto';
+import * as crypto from 'node:crypto';
 
 @Injectable()
 export class PaymentService {
   constructor(
-    @InjectDataSource() private db: DataSource,
-    private config: ConfigService,
-    private push: PushService,
+    @InjectDataSource() private readonly db: DataSource,
+    private readonly config: ConfigService,
+    private readonly push: PushService,
   ) {}
 
   private get cashfreeBase() { return this.config.get<string>('cashfree.baseUrl'); }
@@ -26,18 +26,18 @@ export class PaymentService {
 
   async createOrder(userId: number, planId: number, purpose = 'vendor_plan') {
     const [plan] = await this.db.query(
-      'SELECT * FROM subscription_plans WHERE id = ? AND is_active = 1', [planId],
+      'SELECT * FROM subscription_plans WHERE id = $1 AND is_active = true', [planId],
     );
     if (!plan) throw new NotFoundException('Plan not found');
 
-    if (parseFloat(plan.price) === 0) return { free: true, plan: plan.slug };
+    if (Number.parseFloat(plan.price) === 0) return { free: true, plan: plan.slug };
 
-    const [user] = await this.db.query('SELECT name, email, phone FROM users WHERE id = ?', [userId]);
+    const [user] = await this.db.query('SELECT name, email, phone FROM users WHERE id = $1', [userId]);
     const orderId = 'AL_' + crypto.randomBytes(8).toString('hex').toUpperCase();
 
     const payload = {
       order_id: orderId,
-      order_amount: parseFloat(plan.price),
+      order_amount: Number.parseFloat(plan.price),
       order_currency: 'INR',
       customer_details: {
         customer_id: `USR_${userId}`,
@@ -71,16 +71,16 @@ export class PaymentService {
     }
 
     await this.db.query(
-      'INSERT INTO payments (user_id, order_id, payment_session_id, amount, purpose, reference_id, reference_type) VALUES (?,?,?,?,?,?,?)',
+      'INSERT INTO payments (user_id, order_id, payment_session_id, amount, purpose, reference_id, reference_type) VALUES ($1,$2,$3,$4,$5,$6,$7)',
       [userId, orderId, cfResponse.payment_session_id, plan.price, purpose, plan.id, 'vendor_plan'],
     );
 
-    return { order_id: orderId, payment_session_id: cfResponse.payment_session_id, amount: parseFloat(plan.price), plan: plan.slug };
+    return { order_id: orderId, payment_session_id: cfResponse.payment_session_id, amount: Number.parseFloat(plan.price), plan: plan.slug };
   }
 
   async verifyPayment(userId: number, orderId: string) {
     const [pay] = await this.db.query(
-      'SELECT * FROM payments WHERE order_id = ? AND user_id = ?', [orderId, userId],
+      'SELECT * FROM payments WHERE order_id = $1 AND user_id = $2', [orderId, userId],
     );
     if (!pay) throw new NotFoundException('Payment not found');
     if (pay.status === 'paid') return { status: 'paid', order_id: orderId };
@@ -102,7 +102,7 @@ export class PaymentService {
 
     if (paid) {
       await this.db.query(
-        'UPDATE payments SET status = "paid", cashfree_payment_id = ?, paid_at = NOW() WHERE order_id = ?',
+        'UPDATE payments SET status = \'paid\', cashfree_payment_id = $1, paid_at = NOW() WHERE order_id = $2',
         [cfPaymentId, orderId],
       );
       await this.activateVendorPlan(pay);
@@ -135,11 +135,11 @@ export class PaymentService {
 
     if (status !== 'SUCCESS' || !orderId) return 'ok';
 
-    const [pay] = await this.db.query('SELECT * FROM payments WHERE order_id = ?', [orderId]);
+    const [pay] = await this.db.query('SELECT * FROM payments WHERE order_id = $1', [orderId]);
     if (!pay || pay.status === 'paid') return 'ok';
 
     await this.db.query(
-      'UPDATE payments SET status = "paid", cashfree_payment_id = ?, paid_at = NOW() WHERE order_id = ?',
+      'UPDATE payments SET status = \'paid\', cashfree_payment_id = $1, paid_at = NOW() WHERE order_id = $2',
       [cfPid, orderId],
     );
     await this.activateVendorPlan(pay);
@@ -149,11 +149,11 @@ export class PaymentService {
   private async activateVendorPlan(pay: any) {
     if (pay.reference_type !== 'vendor_plan' || !pay.reference_id) return;
     const [plan] = await this.db.query(
-      'SELECT slug, duration_days FROM subscription_plans WHERE id = ?', [pay.reference_id],
+      'SELECT slug, duration_days FROM subscription_plans WHERE id = $1', [pay.reference_id],
     );
     if (!plan) return;
     await this.db.query(
-      'UPDATE vendors SET subscription_plan = ?, plan_expires_at = DATE_ADD(NOW(), INTERVAL ? DAY) WHERE user_id = ?',
+      'UPDATE vendors SET subscription_plan = $1, plan_expires_at = NOW() + ($2 * INTERVAL \'1 day\') WHERE user_id = $3',
       [plan.slug, plan.duration_days, pay.user_id],
     );
     await this.push.send(

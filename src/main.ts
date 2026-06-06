@@ -3,10 +3,21 @@ import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { join } from 'node:path';
+import * as express from 'express';
+import helmet from 'helmet';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
+
+  // Capture raw body for Cashfree webhook HMAC verification BEFORE json parsing
+  app.use('/api/payment/webhook', express.raw({ type: 'application/json' }));
+
+  // Security headers
+  app.use(helmet());
+
+  // Request size limit
+  app.use(express.json({ limit: '10mb' }));
 
   // Serve landing page at root
   app.useStaticAssets(join(process.cwd(), 'public'));
@@ -33,7 +44,7 @@ async function bootstrap() {
       if (!origin || allowed.has(origin)) return callback(null, true);
       callback(new Error(`CORS: origin '${origin}' not allowed`));
     },
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
     credentials: true,
   });
@@ -42,6 +53,7 @@ async function bootstrap() {
     new ValidationPipe({
       whitelist: true,
       transform: true,
+      forbidNonWhitelisted: true,
     }),
   );
 

@@ -16,7 +16,7 @@ export class VendorApplyController {
   @Post('submit')
   async submit(@CurrentUser() user: any, @Body() dto: SubmitVendorApplicationDto) {
     const [existing] = await this.db.query(
-      'SELECT id FROM vendor_applications WHERE user_id = ? AND status = "pending"',
+      "SELECT id FROM vendor_applications WHERE user_id = $1 AND status = 'pending'",
       [user.user_id],
     );
     if (existing) {
@@ -26,7 +26,7 @@ export class VendorApplyController {
     const result = await this.db.query(
       `INSERT INTO vendor_applications
          (user_id, business_name, category, city, address, phone, website, gst_number, description, lat, lng, logo_url, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'pending') RETURNING id`,
       [
         user.user_id,
         dto.business_name,
@@ -44,7 +44,7 @@ export class VendorApplyController {
     );
     return {
       success: true,
-      data: { id: result.insertId, status: 'pending', message: 'Application submitted for review' },
+      data: { id: result[0].id, status: 'pending', message: 'Application submitted for review' },
     };
   }
 }

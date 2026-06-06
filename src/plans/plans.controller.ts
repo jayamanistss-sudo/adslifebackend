@@ -17,7 +17,7 @@ export class PlansController {
   @Get()
   async list() {
     const data = await this.db.query(
-      'SELECT * FROM subscription_plans WHERE is_active = 1 ORDER BY price ASC',
+      'SELECT * FROM subscription_plans WHERE is_active = true ORDER BY price ASC',
     );
     return { success: true, data };
   }
@@ -29,7 +29,7 @@ export class PlansController {
   async create(@Body() dto: CreatePlanDto) {
     const result = await this.db.query(
       `INSERT INTO subscription_plans (name, slug, price, duration_days, max_offers, features, is_active)
-       VALUES (?, ?, ?, ?, ?, ?, 1)`,
+       VALUES ($1, $2, $3, $4, $5, $6, 1) RETURNING id`,
       [
         dto.name,
         dto.slug,
@@ -39,7 +39,7 @@ export class PlansController {
         JSON.stringify(dto.features ?? []),
       ],
     );
-    return { success: true, data: { id: result.insertId } };
+    return { success: true, data: { id: result[0].id } };
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)
@@ -51,15 +51,15 @@ export class PlansController {
     const updates: string[] = [];
     const values: any[] = [];
     for (const f of fields) {
-      if (dto[f] !== undefined) { updates.push(`${f} = ?`); values.push(dto[f]); }
+      if (dto[f] !== undefined) { values.push(dto[f]); updates.push(`${f} = $${values.length}`); }
     }
     if (dto.features !== undefined) {
-      updates.push('features = ?');
       values.push(JSON.stringify(dto.features));
+      updates.push(`features = $${values.length}`);
     }
     if (!updates.length) return { success: false, error: 'Nothing to update' };
     values.push(id);
-    await this.db.query(`UPDATE subscription_plans SET ${updates.join(', ')} WHERE id = ?`, values);
+    await this.db.query(`UPDATE subscription_plans SET ${updates.join(', ')} WHERE id = $${values.length}`, values);
     return { success: true, data: { updated: true } };
   }
 }

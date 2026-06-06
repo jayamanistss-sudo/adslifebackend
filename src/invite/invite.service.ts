@@ -26,7 +26,7 @@ export class InviteService {
   }
 
   async sendInviteEmail(senderId: number, toEmail: string, offerId?: number, customMessage?: string) {
-    const [sender] = await this.db.query('SELECT name, referral_code FROM users WHERE id = ?', [senderId]);
+    const [sender] = await this.db.query('SELECT name, referral_code FROM users WHERE id = $1', [senderId]);
     if (!sender) throw new InternalServerErrorException('Sender not found');
 
     const appUrl = process.env.APP_URL || 'https://adslife.in';
@@ -35,7 +35,7 @@ export class InviteService {
     let offerSection = '';
     if (offerId) {
       const [offer] = await this.db.query(
-        'SELECT o.title, o.discount_percent, v.business_name FROM offers o JOIN vendors v ON o.vendor_id = v.id WHERE o.id = ?',
+        'SELECT o.title, o.discount_percent, v.business_name FROM offers o JOIN vendors v ON o.vendor_id = v.id WHERE o.id = $1',
         [offerId],
       );
       if (offer) {

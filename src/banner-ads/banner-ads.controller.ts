@@ -31,15 +31,15 @@ export class BannerAdsController {
   @Roles('vendor', 'admin')
   @Post('request')
   async request(@CurrentUser() user: any, @Body() dto: RequestBannerAdDto) {
-    const [vendor] = await this.db.query('SELECT id FROM vendors WHERE user_id = ?', [user.user_id]);
+    const [vendor] = await this.db.query('SELECT id FROM vendors WHERE user_id = $1', [user.user_id]);
     if (!vendor) return { success: false, error: 'Vendor not found' };
 
     const result = await this.db.query(
       `INSERT INTO banner_ad_requests (vendor_id, image_url, target_url, position, duration_days, status)
-       VALUES (?, ?, ?, ?, ?, 'pending')`,
+       VALUES ($1, $2, $3, $4, $5, 'pending') RETURNING id`,
       [vendor.id, dto.image_url, dto.target_url, dto.position ?? 'top', dto.duration_days ?? 7],
     );
-    return { success: true, data: { id: result.insertId, status: 'pending' } };
+    return { success: true, data: { id: result[0].id, status: 'pending' } };
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)
@@ -50,14 +50,14 @@ export class BannerAdsController {
     if (dto.status === 'approved') {
       await this.db.query(
         `UPDATE banner_ad_requests
-         SET status = ?, review_note = ?,
-             expires_at = DATE_ADD(NOW(), INTERVAL (SELECT duration_days FROM banner_ad_requests WHERE id = ?) DAY)
-         WHERE id = ?`,
+         SET status = $1, review_note = $2,
+             expires_at = NOW() + (SELECT duration_days FROM banner_ad_requests WHERE id = $3) * INTERVAL '1 day'
+         WHERE id = $4`,
         [dto.status, dto.note ?? null, id, id],
       );
     } else {
       await this.db.query(
-        'UPDATE banner_ad_requests SET status = ?, review_note = ? WHERE id = ?',
+        'UPDATE banner_ad_requests SET status = $1, review_note = $2 WHERE id = $3',
         [dto.status, dto.note ?? null, id],
       );
     }

@@ -71,17 +71,17 @@ export class TargetingController {
     const maxDistance = dto.max_distance_km ?? 15;
 
     const [existing] = await this.db.query(
-      'SELECT id FROM user_preferences WHERE user_id = ?',
+      'SELECT id FROM user_preferences WHERE user_id = $1',
       [user.user_id],
     );
     if (existing) {
       await this.db.query(
-        'UPDATE user_preferences SET preferred_categories=?, max_distance_km=?, preferred_vendors=?, updated_at=NOW() WHERE user_id=?',
+        'UPDATE user_preferences SET preferred_categories=$1, max_distance_km=$2, preferred_vendors=$3, updated_at=NOW() WHERE user_id=$4',
         [JSON.stringify(categories), maxDistance, JSON.stringify(vendors), user.user_id],
       );
     } else {
       await this.db.query(
-        'INSERT INTO user_preferences (user_id, preferred_categories, max_distance_km, preferred_vendors) VALUES (?,?,?,?)',
+        'INSERT INTO user_preferences (user_id, preferred_categories, max_distance_km, preferred_vendors) VALUES ($1,$2,$3,$4)',
         [user.user_id, JSON.stringify(categories), maxDistance, JSON.stringify(vendors)],
       );
     }

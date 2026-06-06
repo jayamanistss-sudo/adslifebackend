@@ -46,7 +46,7 @@ export class FraudController {
   @Post('review/:id')
   async review(@Param('id', ParseIntPipe) id: number, @Body() dto: FraudReviewDto) {
     await this.db.query(
-      'UPDATE fraud_flags SET status = ?, review_note = ? WHERE id = ?',
+      'UPDATE fraud_flags SET status = $1, review_note = $2 WHERE id = $3',
       [dto.status, dto.note ?? null, id],
     );
     return { success: true, data: { updated: true } };

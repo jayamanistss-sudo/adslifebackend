@@ -33,7 +33,7 @@ export class TranslateController {
     const targetLang = dto.target_lang ?? 'hi';
 
     const [offer] = await this.db.query(
-      'SELECT id, title, description FROM offers WHERE id = ?',
+      'SELECT id, title, description FROM offers WHERE id = $1',
       [dto.offer_id],
     );
     if (!offer) return { success: false, error: 'Offer not found' };

@@ -1,14 +1,14 @@
 import { Injectable } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
-import * as fs from 'fs';
-import * as path from 'path';
-import * as crypto from 'crypto';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import * as crypto from 'node:crypto';
 import axios from 'axios';
 
 @Injectable()
 export class PushService {
-  constructor(@InjectDataSource() private db: DataSource) {}
+  constructor(@InjectDataSource() private readonly db: DataSource) {}
 
   private getServiceAccount(): any {
     const p = path.join(__dirname, '../../config/firebase-service-account.json');
@@ -18,7 +18,7 @@ export class PushService {
 
   private b64url(data: Buffer | string): string {
     const buf = typeof data === 'string' ? Buffer.from(data) : data;
-    return buf.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+    return buf.toString('base64').replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
   }
 
   private async getAccessToken(sa: any): Promise<string | null> {
@@ -58,7 +58,7 @@ export class PushService {
     const ids = Array.isArray(userIds) ? userIds : [userIds];
     if (!ids.length) return 0;
 
-    const placeholders = ids.map(() => '?').join(',');
+    const placeholders = ids.map((_: any, i: number) => `$${i + 1}`).join(',');
     const tokens = await this.db.query(
       `SELECT token, user_id FROM user_fcm_tokens WHERE user_id IN (${placeholders})`,
       ids,
@@ -91,7 +91,7 @@ export class PushService {
           const offerId = data.offer_id ? +data.offer_id : null;
           if (uid) {
             await this.db.query(
-              'INSERT INTO notifications (user_id, title, body, type, offer_id, is_read) VALUES (?, ?, ?, ?, ?, 0)',
+              'INSERT INTO notifications (user_id, title, body, type, offer_id, is_read) VALUES ($1, $2, $3, $4, $5, 0)',
               [uid, title, body, data.type ?? 'push', offerId],
             );
           }
@@ -109,7 +109,7 @@ export class PushService {
     }
 
     if (stale.length) {
-      const pl = stale.map(() => '?').join(',');
+      const pl = stale.map((_: any, i: number) => `$${i + 1}`).join(',');
       await this.db.query(`DELETE FROM user_fcm_tokens WHERE token IN (${pl})`, stale);
     }
 

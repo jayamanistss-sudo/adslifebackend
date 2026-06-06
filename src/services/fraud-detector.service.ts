@@ -14,7 +14,7 @@ export class FraudDetectorService {
 
   async checkVendor(vendorId: number) {
     const [vendor] = await this.db.query(
-      'SELECT v.*, u.created_at as user_created_at FROM vendors v JOIN users u ON v.user_id = u.id WHERE v.id = ?',
+      'SELECT v.*, u.created_at as user_created_at FROM vendors v JOIN users u ON v.user_id = u.id WHERE v.id = $1',
       [vendorId],
     );
     if (!vendor) return { score: 0, flags: [], action: 'none' };
@@ -23,8 +23,8 @@ export class FraudDetectorService {
 
     const [dupName] = await this.db.query(
       `SELECT id FROM vendors
-       WHERE id != ? AND status != 'rejected'
-         AND (SOUNDEX(business_name) = SOUNDEX(?) OR business_name = ?)
+       WHERE id != $1 AND status != 'rejected'
+         AND (SOUNDEX(business_name) = SOUNDEX($2) OR business_name = $3)
        LIMIT 1`,
       [vendorId, vendor.business_name, vendor.business_name],
     );
@@ -35,7 +35,7 @@ export class FraudDetectorService {
     }
 
     const [bulk] = await this.db.query(
-      'SELECT COUNT(*) as cnt FROM offers WHERE vendor_id = ? AND created_at >= DATE_SUB(NOW(), INTERVAL 1 HOUR)',
+      'SELECT COUNT(*) as cnt FROM offers WHERE vendor_id = $1 AND created_at >= NOW() - INTERVAL \'1 hour\'',
       [vendorId],
     );
     if (+bulk.cnt > 10) { score += RULES.bulk_offer_creation; flags.push('bulk_offer_creation'); }
@@ -48,7 +48,7 @@ export class FraudDetectorService {
     if (!vendor.lat || !vendor.lng) { score += RULES.missing_location_data; flags.push('missing_location_data'); }
 
     const ageHours = (Date.now() - new Date(vendor.user_created_at).getTime()) / 3600000;
-    const [offerCount] = await this.db.query('SELECT COUNT(*) as cnt FROM offers WHERE vendor_id = ?', [vendorId]);
+    const [offerCount] = await this.db.query('SELECT COUNT(*) as cnt FROM offers WHERE vendor_id = $1', [vendorId]);
     if (ageHours < 24 && +offerCount.cnt > 5) {
       score += RULES.newly_registered_bulk_post; flags.push('newly_registered_bulk_post');
     }
@@ -57,7 +57,7 @@ export class FraudDetectorService {
   }
 
   async checkOffer(offerId: number) {
-    const [offer] = await this.db.query('SELECT * FROM offers WHERE id = ?', [offerId]);
+    const [offer] = await this.db.query('SELECT * FROM offers WHERE id = $1', [offerId]);
     if (!offer) return { score: 0, flags: [], action: 'none' };
 
     let score = 0; const flags: string[] = [];
@@ -68,7 +68,7 @@ export class FraudDetectorService {
 
     if (offer.description) {
       const [dup] = await this.db.query(
-        'SELECT id FROM offers WHERE MD5(description) = MD5(?) AND id != ? LIMIT 1',
+        'SELECT id FROM offers WHERE MD5(description) = MD5($1) AND id != $2 LIMIT 1',
         [offer.description, offerId],
       );
       if (dup) { score += RULES.copied_description; flags.push('copied_description'); }
@@ -90,8 +90,8 @@ export class FraudDetectorService {
 
     if (action !== 'none') {
       await this.db.query(
-        `INSERT INTO fraud_flags (entity_type, entity_id, flag_reason, confidence_score) VALUES (?,?,?,?)
-         ON DUPLICATE KEY UPDATE flag_reason=VALUES(flag_reason), confidence_score=VALUES(confidence_score)`,
+        `INSERT INTO fraud_flags (entity_type, entity_id, flag_reason, confidence_score) VALUES ($1,$2,$3,$4)
+         ON CONFLICT (entity_type, entity_id) DO UPDATE SET flag_reason=EXCLUDED.flag_reason, confidence_score=EXCLUDED.confidence_score`,
         [type, entityId, flags.join(', '), score],
       );
     }

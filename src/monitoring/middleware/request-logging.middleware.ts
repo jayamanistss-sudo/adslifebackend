@@ -71,18 +71,14 @@ export class RequestLoggingMiddleware implements NestMiddleware {
     const ua = req.get('user-agent') ?? '';
     const reqBody = ['POST', 'PUT', 'PATCH'].includes(method) ? req.body : undefined;
 
-    // Capture response body by intercepting write/end
-    const chunks: Buffer[] = [];
-    const origWrite = (res as any).write.bind(res);
+    // Capture response body only for error responses to avoid buffering large success payloads
+    let errorBodyChunk: string | null = null;
     const origEnd = (res as any).end.bind(res);
 
-    (res as any).write = (chunk: any, ...args: any[]) => {
-      if (chunk) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
-      return origWrite(chunk, ...args);
-    };
-
     (res as any).end = (chunk: any, ...args: any[]) => {
-      if (chunk) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
+      if (res.statusCode >= 400 && chunk) {
+        try { errorBodyChunk = Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk); } catch { /* ignore */ }
+      }
       const ms = Date.now() - start;
       const statusCode = res.statusCode;
       const user = (req as any).user as any;
@@ -92,8 +88,8 @@ export class RequestLoggingMiddleware implements NestMiddleware {
       setImmediate(async () => {
         try {
           let responseBody: any = null;
-          if (statusCode >= 400) {
-            try { responseBody = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { /* non-JSON */ }
+          if (statusCode >= 400 && errorBodyChunk) {
+            try { responseBody = JSON.parse(errorBodyChunk); } catch { /* non-JSON */ }
           }
 
           await this.monitoring.logRequest({

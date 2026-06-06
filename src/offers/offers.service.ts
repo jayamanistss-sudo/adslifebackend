@@ -13,13 +13,13 @@ import { NotificationsGateway } from '../gateway/notifications.gateway';
 @Injectable()
 export class OffersService {
   constructor(
-    @InjectDataSource() private db: DataSource,
-    private push: PushService,
-    private gateway: NotificationsGateway,
+    @InjectDataSource() private readonly db: DataSource,
+    private readonly push: PushService,
+    private readonly gateway: NotificationsGateway,
   ) {}
 
   private async getVendorId(userId: number): Promise<number> {
-    const [vendor] = await this.db.query('SELECT id FROM vendors WHERE user_id = ?', [userId]);
+    const [vendor] = await this.db.query('SELECT id FROM vendors WHERE user_id = $1', [userId]);
     if (!vendor) throw new NotFoundException('Vendor profile not found');
     return vendor.id;
   }
@@ -35,7 +35,8 @@ export class OffersService {
       `INSERT INTO offers (vendor_id, title, description, category, discount_percent,
         original_price, offer_price, image_url, coupon_code, redeem_url, max_redemptions,
         valid_from, valid_until, is_active)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 1)
+       RETURNING id`,
       [
         vendorId, dto.title.trim(), dto.description?.trim() || null,
         dto.category?.trim() || 'general', dto.discount_percent ?? null,
@@ -45,7 +46,7 @@ export class OffersService {
         validFrom, validUntil,
       ],
     );
-    const offerId = result.insertId;
+    const offerId = result[0].id;
 
     // Notify all subscribers of this vendor (fire-and-forget)
     this.notifySubscribers(vendorId, offerId, dto.title.trim(), dto.discount_percent).catch(() => {});
@@ -54,11 +55,11 @@ export class OffersService {
   }
 
   private async notifySubscribers(vendorId: number, offerId: number, title: string, discountPercent?: number) {
-    const [vendor] = await this.db.query('SELECT business_name FROM vendors WHERE id = ?', [vendorId]);
+    const [vendor] = await this.db.query('SELECT business_name FROM vendors WHERE id = $1', [vendorId]);
     if (!vendor) return;
 
     const followers = await this.db.query(
-      'SELECT user_id FROM vendor_followers WHERE vendor_id = ?',
+      'SELECT user_id FROM vendor_followers WHERE vendor_id = $1',
       [vendorId],
     );
     if (!followers.length) return;
@@ -88,7 +89,7 @@ export class OffersService {
   }
 
   async update(userId: number, offerId: number, dto: UpdateOfferDto, role: string) {
-    const [offer] = await this.db.query('SELECT vendor_id FROM offers WHERE id = ?', [offerId]);
+    const [offer] = await this.db.query('SELECT vendor_id FROM offers WHERE id = $1', [offerId]);
     if (!offer) throw new NotFoundException('Offer not found');
 
     if (role !== 'admin') {
@@ -112,26 +113,26 @@ export class OffersService {
       original_price:   dto.original_price   ?? undefined,
       offer_price:      dto.offer_price       ?? undefined,
       max_redemptions:  dto.max_redemptions   ?? undefined,
-      is_active: dto.is_active !== undefined ? (dto.is_active ? 1 : 0) : undefined,
+      is_active: dto.is_active === undefined ? undefined : Number(dto.is_active),
       valid_from:  dto.valid_from  ? dto.valid_from  + ' 00:00:00' : undefined,
       valid_until: dto.valid_until ? dto.valid_until + ' 23:59:59' : undefined,
     };
 
     for (const [key, val] of Object.entries(map)) {
       if (val !== undefined) {
-        fields.push(`${key} = ?`);
+        fields.push(`${key} = $${values.length + 1}`);
         values.push(val);
       }
     }
 
     if (fields.length === 0) throw new BadRequestException('No fields to update');
     values.push(offerId);
-    await this.db.query(`UPDATE offers SET ${fields.join(', ')} WHERE id = ?`, values);
+    await this.db.query(`UPDATE offers SET ${fields.join(', ')} WHERE id = $${values.length}`, values);
     return { updated: true };
   }
 
   async delete(userId: number, offerId: number, role: string) {
-    const [offer] = await this.db.query('SELECT vendor_id FROM offers WHERE id = ?', [offerId]);
+    const [offer] = await this.db.query('SELECT vendor_id FROM offers WHERE id = $1', [offerId]);
     if (!offer) throw new NotFoundException('Offer not found');
 
     if (role !== 'admin') {
@@ -139,7 +140,7 @@ export class OffersService {
       if (offer.vendor_id !== vendorId) throw new ForbiddenException('Access denied');
     }
 
-    await this.db.query('DELETE FROM offers WHERE id = ?', [offerId]);
+    await this.db.query('DELETE FROM offers WHERE id = $1', [offerId]);
     return { deleted: true };
   }
 
@@ -178,7 +179,7 @@ export class OffersService {
          v.description        AS vendorDescription
        FROM offers o
        JOIN vendors v ON o.vendor_id = v.id
-       WHERE o.id = ?`,
+       WHERE o.id = $1`,
       [offerId],
     );
     if (!offer) throw new NotFoundException('Offer not found');
@@ -195,7 +196,7 @@ export class OffersService {
   }
 
   async trackView(offerId: number) {
-    await this.db.query('UPDATE offers SET views = views + 1 WHERE id = ?', [offerId]);
+    await this.db.query('UPDATE offers SET views = views + 1 WHERE id = $1', [offerId]);
   }
 
   async myOffers(userId: number) {
@@ -205,7 +206,7 @@ export class OffersService {
               original_price, offer_price, image_url, coupon_code, redeem_url,
               views, clicks, saves, is_active, valid_from, valid_until,
               current_redemptions, max_redemptions, created_at
-       FROM offers WHERE vendor_id = ? ORDER BY created_at DESC`,
+       FROM offers WHERE vendor_id = $1 ORDER BY created_at DESC`,
       [vendorId],
     );
   }

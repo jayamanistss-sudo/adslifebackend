@@ -1,6 +1,14 @@
 import { Module } from '@nestjs/common';
+import { TypeOrmModule } from '@nestjs/typeorm';
 import { AnalyticsController } from './analytics.controller';
 import { AnalyticsService } from './analytics.service';
+import { Offer } from '../entities/offer.entity';
+import { UserInteraction } from '../entities/user-interaction.entity';
+import { VendorDailyStat } from '../entities/vendor-daily-stat.entity';
 
-@Module({ controllers: [AnalyticsController], providers: [AnalyticsService] })
+@Module({
+  imports: [TypeOrmModule.forFeature([Offer, UserInteraction, VendorDailyStat])],
+  controllers: [AnalyticsController],
+  providers: [AnalyticsService],
+})
 export class AnalyticsModule {}
