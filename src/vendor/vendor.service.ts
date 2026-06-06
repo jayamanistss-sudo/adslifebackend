@@ -1,6 +1,13 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
 import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
+import { Vendor } from '../entities/vendor.entity';
+import { VendorFollower } from '../entities/vendor-follower.entity';
+import { User } from '../entities/user.entity';
+import { Offer } from '../entities/offer.entity';
+import { UserInteraction } from '../entities/user-interaction.entity';
+import { SubscriptionPlan } from '../entities/subscription-plan.entity';
 
 function pctChange(cur: number, prev: number): string {
   if (prev === 0) return cur > 0 ? '+100%' : '0%';
@@ -10,84 +17,109 @@ function pctChange(cur: number, prev: number): string {
 
 @Injectable()
 export class VendorService {
-  constructor(@InjectDataSource() private db: DataSource) {}
+  constructor(
+    @InjectRepository(Vendor) private readonly vendorRepo: Repository<Vendor>,
+    @InjectRepository(VendorFollower) private readonly followerRepo: Repository<VendorFollower>,
+    @InjectRepository(User) private readonly userRepo: Repository<User>,
+    @InjectRepository(Offer) private readonly offerRepo: Repository<Offer>,
+    @InjectRepository(UserInteraction) private readonly interactionRepo: Repository<UserInteraction>,
+    @InjectRepository(SubscriptionPlan) private readonly planRepo: Repository<SubscriptionPlan>,
+    @InjectDataSource() private readonly dataSource: DataSource,
+  ) {}
 
   async dashboard(userId: number) {
-    const [vendor] = await this.db.query(
-      `SELECT v.*, sp.name AS plan_name, sp.slug AS plan_slug,
-              sp.max_offers, sp.duration_days, sp.price AS plan_price, sp.features AS plan_features,
-              (SELECT COUNT(*) FROM vendor_followers WHERE vendor_id = v.id) AS live_followers
-       FROM vendors v
-       LEFT JOIN subscription_plans sp ON sp.slug = v.subscription_plan
-       WHERE v.user_id = $1`,
-      [userId],
-    );
+    const vendor = await this.vendorRepo
+      .createQueryBuilder('v')
+      .leftJoin(SubscriptionPlan, 'sp', 'sp.slug = v.subscription_plan')
+      .select([
+        'v.*',
+        'sp.name AS plan_name', 'sp.slug AS plan_slug',
+        'sp.max_offers AS max_offers', 'sp.duration_days AS duration_days',
+        'sp.price AS plan_price', 'sp.features AS plan_features',
+        '(SELECT COUNT(*) FROM vendor_followers WHERE vendor_id = v.id) AS live_followers',
+      ])
+      .where('v.user_id = :userId', { userId })
+      .getRawOne();
     if (!vendor) throw new NotFoundException('Vendor profile not found');
-    const vendorId = vendor.id;
+    const vendorId = +vendor.id;
 
-    const [offerSummary] = await this.db.query(
-      `SELECT COUNT(*) AS total_offers,
-              SUM(CASE WHEN is_active=true THEN 1 ELSE 0 END) AS active_offers,
-              SUM(CASE WHEN is_active=false THEN 1 ELSE 0 END) AS inactive_offers,
-              SUM(CASE WHEN valid_until IS NOT NULL AND valid_until < NOW() AND is_active=true THEN 1 ELSE 0 END) AS expired_offers,
-              COALESCE(SUM(views),0) AS total_views, COALESCE(SUM(clicks),0) AS total_clicks,
-              COALESCE(SUM(saves),0) AS total_saves,
-              COALESCE(SUM(current_redemptions),0) AS total_redemptions
-       FROM offers WHERE vendor_id = $1`,
-      [vendorId],
-    );
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const sixtyDaysAgo  = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000);
+    const fourteenDaysAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
 
-    const recentOffers = await this.db.query(
-      `SELECT id, title, category, discount_percent, views, clicks, saves,
-              is_active, valid_until, current_redemptions, max_redemptions
-       FROM offers WHERE vendor_id = $1 ORDER BY created_at DESC LIMIT 5`,
-      [vendorId],
-    );
+    const [offerSummary, recentOffers, cur, prev, hourRows, dailyTrend] = await Promise.all([
+      this.offerRepo.createQueryBuilder('o')
+        .select([
+          'COUNT(*) AS total_offers',
+          'SUM(CASE WHEN o.is_active=true THEN 1 ELSE 0 END) AS active_offers',
+          'SUM(CASE WHEN o.is_active=false THEN 1 ELSE 0 END) AS inactive_offers',
+          'SUM(CASE WHEN o.valid_until IS NOT NULL AND o.valid_until < NOW() AND o.is_active=true THEN 1 ELSE 0 END) AS expired_offers',
+          'COALESCE(SUM(o.views),0) AS total_views',
+          'COALESCE(SUM(o.clicks),0) AS total_clicks',
+          'COALESCE(SUM(o.saves),0) AS total_saves',
+          'COALESCE(SUM(o.current_redemptions),0) AS total_redemptions',
+        ])
+        .where('o.vendor_id = :vendorId', { vendorId })
+        .getRawOne(),
 
-    const [cur] = await this.db.query(
-      `SELECT COALESCE(SUM(CASE WHEN action='view' THEN 1 ELSE 0 END),0) AS imp,
-              COALESCE(SUM(CASE WHEN action='click' THEN 1 ELSE 0 END),0) AS clk,
-              COALESCE(SUM(CASE WHEN action='save' THEN 1 ELSE 0 END),0) AS sv
-       FROM user_interactions ui JOIN offers o ON ui.offer_id = o.id
-       WHERE o.vendor_id = $1 AND ui.created_at >= NOW() - INTERVAL '30 days'`,
-      [vendorId],
-    );
-    const [prev] = await this.db.query(
-      `SELECT COALESCE(SUM(CASE WHEN action='view' THEN 1 ELSE 0 END),0) AS imp,
-              COALESCE(SUM(CASE WHEN action='click' THEN 1 ELSE 0 END),0) AS clk,
-              COALESCE(SUM(CASE WHEN action='save' THEN 1 ELSE 0 END),0) AS sv
-       FROM user_interactions ui JOIN offers o ON ui.offer_id = o.id
-       WHERE o.vendor_id = $1
-         AND ui.created_at >= NOW() - INTERVAL '60 days'
-         AND ui.created_at < NOW() - INTERVAL '30 days'`,
-      [vendorId],
-    );
+      this.offerRepo.find({
+        where: { vendor_id: vendorId },
+        select: ['id', 'title', 'category', 'discount_percent', 'views', 'clicks', 'saves', 'is_active', 'valid_until', 'current_redemptions', 'max_redemptions'],
+        order: { created_at: 'DESC' },
+        take: 5,
+      }),
 
-    const hourRows = await this.db.query(
-      `SELECT EXTRACT(HOUR FROM oi.created_at) AS hr, COUNT(*) AS count
-       FROM offer_impressions oi JOIN offers o ON oi.offer_id = o.id
-       WHERE o.vendor_id = $1 AND oi.created_at >= NOW() - INTERVAL '30 days'
-       GROUP BY EXTRACT(HOUR FROM oi.created_at)`,
-      [vendorId],
-    );
+      this.interactionRepo.createQueryBuilder('ui')
+        .innerJoin(Offer, 'o', 'o.id = ui.offer_id')
+        .select([
+          "COALESCE(SUM(CASE WHEN ui.action='view' THEN 1 ELSE 0 END),0) AS imp",
+          "COALESCE(SUM(CASE WHEN ui.action='click' THEN 1 ELSE 0 END),0) AS clk",
+          "COALESCE(SUM(CASE WHEN ui.action='save' THEN 1 ELSE 0 END),0) AS sv",
+        ])
+        .where('o.vendor_id = :vendorId AND ui.created_at >= :since', { vendorId, since: thirtyDaysAgo })
+        .getRawOne(),
+
+      this.interactionRepo.createQueryBuilder('ui')
+        .innerJoin(Offer, 'o', 'o.id = ui.offer_id')
+        .select([
+          "COALESCE(SUM(CASE WHEN ui.action='view' THEN 1 ELSE 0 END),0) AS imp",
+          "COALESCE(SUM(CASE WHEN ui.action='click' THEN 1 ELSE 0 END),0) AS clk",
+          "COALESCE(SUM(CASE WHEN ui.action='save' THEN 1 ELSE 0 END),0) AS sv",
+        ])
+        .where('o.vendor_id = :vendorId AND ui.created_at >= :from AND ui.created_at < :to', {
+          vendorId, from: sixtyDaysAgo, to: thirtyDaysAgo,
+        })
+        .getRawOne(),
+
+      this.dataSource.createQueryBuilder()
+        .select(['EXTRACT(HOUR FROM oi.created_at) AS hr', 'COUNT(*) AS count'])
+        .from('offer_impressions', 'oi')
+        .innerJoin('offers', 'o', 'o.id = oi.offer_id')
+        .where('o.vendor_id = :vendorId AND oi.created_at >= :since', { vendorId, since: thirtyDaysAgo })
+        .groupBy('EXTRACT(HOUR FROM oi.created_at)')
+        .getRawMany(),
+
+      this.interactionRepo.createQueryBuilder('ui')
+        .innerJoin(Offer, 'o', 'o.id = ui.offer_id')
+        .select([
+          'ui.created_at::date AS stat_date',
+          "SUM(CASE WHEN ui.action='view' THEN 1 ELSE 0 END) AS impressions",
+          "SUM(CASE WHEN ui.action='click' THEN 1 ELSE 0 END) AS clicks",
+          "SUM(CASE WHEN ui.action='save' THEN 1 ELSE 0 END) AS saves",
+        ])
+        .where('o.vendor_id = :vendorId AND ui.created_at >= :since', { vendorId, since: fourteenDaysAgo })
+        .groupBy('ui.created_at::date')
+        .orderBy('stat_date', 'ASC')
+        .getRawMany(),
+    ]);
+
     const peakHours = Array(24).fill(0);
-    for (const r of hourRows) peakHours[r.hr] = parseInt(r.count);
+    for (const r of hourRows) peakHours[+r.hr] = parseInt(r.count);
 
-    const dailyTrend = await this.db.query(
-      `SELECT ui.created_at::date AS stat_date,
-              SUM(CASE WHEN action='view' THEN 1 ELSE 0 END) AS impressions,
-              SUM(CASE WHEN action='click' THEN 1 ELSE 0 END) AS clicks,
-              SUM(CASE WHEN action='save' THEN 1 ELSE 0 END) AS saves
-       FROM user_interactions ui JOIN offers o ON ui.offer_id = o.id
-       WHERE o.vendor_id = $1 AND ui.created_at >= NOW() - INTERVAL '14 days'
-       GROUP BY ui.created_at::date ORDER BY stat_date ASC`,
-      [vendorId],
-    );
-
-    const curImp = +cur.imp, prevImp = +prev.imp;
-    const curClk = +cur.clk, prevClk = +prev.clk;
-    const curSv = +cur.sv, prevSv = +prev.sv;
-    const curEng = curImp > 0 ? Math.round(((curClk + curSv) / curImp) * 10000) / 100 : 0;
+    const curImp = +cur?.imp || 0, prevImp = +prev?.imp || 0;
+    const curClk = +cur?.clk || 0, prevClk = +prev?.clk || 0;
+    const curSv  = +cur?.sv  || 0, prevSv  = +prev?.sv  || 0;
+    const curEng  = curImp  > 0 ? Math.round(((curClk  + curSv)  / curImp)  * 10000) / 100 : 0;
     const prevEng = prevImp > 0 ? Math.round(((prevClk + prevSv) / prevImp) * 10000) / 100 : 0;
 
     return {
@@ -110,11 +142,11 @@ export class VendorService {
         engagement_trend: pctChange(Math.round(curEng), Math.round(prevEng)),
       },
       offers: {
-        total: +offerSummary.total_offers || 0, active: +offerSummary.active_offers || 0,
-        inactive: +offerSummary.inactive_offers || 0, expired: +offerSummary.expired_offers || 0,
-        total_views: +offerSummary.total_views || 0, total_clicks: +offerSummary.total_clicks || 0,
-        total_saves: +offerSummary.total_saves || 0,
-        total_redemptions: +offerSummary.total_redemptions || 0,
+        total: +offerSummary?.total_offers || 0, active: +offerSummary?.active_offers || 0,
+        inactive: +offerSummary?.inactive_offers || 0, expired: +offerSummary?.expired_offers || 0,
+        total_views: +offerSummary?.total_views || 0, total_clicks: +offerSummary?.total_clicks || 0,
+        total_saves: +offerSummary?.total_saves || 0,
+        total_redemptions: +offerSummary?.total_redemptions || 0,
       },
       recent_offers: recentOffers,
       peak_hours: peakHours,
@@ -123,166 +155,156 @@ export class VendorService {
   }
 
   async getMyProfile(userId: number) {
-    const [vendor] = await this.db.query(
-      `SELECT v.*, u.name, u.email, u.avatar_url as user_avatar
-       FROM vendors v JOIN users u ON v.user_id = u.id
-       WHERE v.user_id = $1`,
-      [userId],
-    );
+    const vendor = await this.vendorRepo
+      .createQueryBuilder('v')
+      .innerJoin(User, 'u', 'u.id = v.user_id')
+      .select(['v.*', 'u.name AS name', 'u.email AS email', 'u.avatar_url AS user_avatar'])
+      .where('v.user_id = :userId', { userId })
+      .getRawOne();
     if (!vendor) throw new NotFoundException('Vendor not found');
     return vendor;
   }
 
   async getProfile(vendorId: number) {
-    const [vendor] = await this.db.query(
-      `SELECT v.*, u.name, u.avatar_url as user_avatar
-       FROM vendors v JOIN users u ON v.user_id = u.id
-       WHERE v.id = $1`,
-      [vendorId],
-    );
+    const vendor = await this.vendorRepo
+      .createQueryBuilder('v')
+      .innerJoin(User, 'u', 'u.id = v.user_id')
+      .select(['v.*', 'u.name AS name', 'u.avatar_url AS user_avatar'])
+      .where('v.id = :vendorId', { vendorId })
+      .getRawOne();
     if (!vendor) throw new NotFoundException('Vendor not found');
     return vendor;
   }
 
   async updateProfile(userId: number, dto: Record<string, any>) {
-    const [vendor] = await this.db.query('SELECT id FROM vendors WHERE user_id = $1', [userId]);
+    const vendor = await this.vendorRepo.findOne({ where: { user_id: userId }, select: ['id'] });
     if (!vendor) throw new NotFoundException('Vendor not found');
 
     const allowed = ['business_name', 'category', 'city', 'address', 'phone', 'website', 'description', 'logo_url', 'lat', 'lng', 'gst_number'];
-    const fields: string[] = [];
-    const values: any[] = [];
+    const updateData: Partial<Vendor> = {};
     for (const key of allowed) {
-      if (dto[key] !== undefined) { fields.push(`${key} = $${values.length + 1}`); values.push(dto[key]); }
+      if (dto[key] !== undefined) (updateData as any)[key] = dto[key];
     }
-    if (fields.length === 0) return { updated: false };
-    values.push(vendor.id);
-    await this.db.query(`UPDATE vendors SET ${fields.join(', ')} WHERE id = $${values.length}`, values);
+    if (Object.keys(updateData).length === 0) return { updated: false };
+    await this.vendorRepo.update(vendor.id, updateData);
     return { updated: true };
   }
 
   async getFollowStatus(userId: number, vendorId: number) {
-    const [row] = await this.db.query(
-      'SELECT id FROM vendor_followers WHERE user_id = $1 AND vendor_id = $2',
-      [userId, vendorId],
-    );
-    const [{ cnt }] = await this.db.query(
-      'SELECT COUNT(*) as cnt FROM vendor_followers WHERE vendor_id = $1',
-      [vendorId],
-    );
-    return { following: !!row, followers_count: +cnt };
+    const [row, cnt] = await Promise.all([
+      this.followerRepo.findOne({ where: { user_id: userId, vendor_id: vendorId }, select: ['id'] }),
+      this.followerRepo.count({ where: { vendor_id: vendorId } }),
+    ]);
+    return { following: !!row, followers_count: cnt };
   }
 
   async toggleFollow(userId: number, vendorId: number) {
-    const [existing] = await this.db.query(
-      'SELECT id FROM vendor_followers WHERE user_id = $1 AND vendor_id = $2',
-      [userId, vendorId],
-    );
+    const existing = await this.followerRepo.findOne({ where: { user_id: userId, vendor_id: vendorId }, select: ['id'] });
     let following: boolean;
     if (existing) {
-      await this.db.query('DELETE FROM vendor_followers WHERE user_id = $1 AND vendor_id = $2', [userId, vendorId]);
+      await this.followerRepo.delete({ user_id: userId, vendor_id: vendorId });
       following = false;
     } else {
-      await this.db.query('INSERT INTO vendor_followers (user_id, vendor_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [userId, vendorId]);
+      await this.followerRepo
+        .createQueryBuilder()
+        .insert()
+        .into(VendorFollower)
+        .values({ user_id: userId, vendor_id: vendorId })
+        .orIgnore()
+        .execute();
       following = true;
     }
-    const [{ cnt }] = await this.db.query('SELECT COUNT(*) as cnt FROM vendor_followers WHERE vendor_id = $1', [vendorId]);
-    return { following, followers_count: +cnt };
+    const cnt = await this.followerRepo.count({ where: { vendor_id: vendorId } });
+    return { following, followers_count: cnt };
   }
 
   async follow(userId: number, vendorId: number) {
-    const [v] = await this.db.query('SELECT id FROM vendors WHERE id = $1', [vendorId]);
+    const v = await this.vendorRepo.findOne({ where: { id: vendorId }, select: ['id'] });
     if (!v) throw new NotFoundException('Vendor not found');
 
-    await this.db.query(
-      'INSERT INTO vendor_followers (user_id, vendor_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
-      [userId, vendorId],
-    );
-    await this.db.query(
-      'UPDATE vendors SET total_followers = (SELECT COUNT(*) FROM vendor_followers WHERE vendor_id = $1) WHERE id = $2',
-      [vendorId, vendorId],
-    );
+    await this.followerRepo
+      .createQueryBuilder()
+      .insert()
+      .into(VendorFollower)
+      .values({ user_id: userId, vendor_id: vendorId })
+      .orIgnore()
+      .execute();
+
+    const cnt = await this.followerRepo.count({ where: { vendor_id: vendorId } });
+    await this.vendorRepo.update(vendorId, { total_followers: cnt });
     return { following: true };
   }
 
   async unfollow(userId: number, vendorId: number) {
-    await this.db.query(
-      'DELETE FROM vendor_followers WHERE user_id = $1 AND vendor_id = $2',
-      [userId, vendorId],
-    );
-    await this.db.query(
-      'UPDATE vendors SET total_followers = (SELECT COUNT(*) FROM vendor_followers WHERE vendor_id = $1) WHERE id = $2',
-      [vendorId, vendorId],
-    );
+    await this.followerRepo.delete({ user_id: userId, vendor_id: vendorId });
+    const cnt = await this.followerRepo.count({ where: { vendor_id: vendorId } });
+    await this.vendorRepo.update(vendorId, { total_followers: cnt });
     return { following: false };
   }
 
   async getFollowers(vendorId: number, limit = 20) {
-    const followers = await this.db.query(
-      `SELECT u.id, u.name, u.avatar_url, u.city, vf.created_at as followed_at
-       FROM vendor_followers vf JOIN users u ON vf.user_id = u.id
-       WHERE vf.vendor_id = $1 ORDER BY vf.created_at DESC LIMIT $2`,
-      [vendorId, limit],
-    );
+    const followers = await this.followerRepo
+      .createQueryBuilder('vf')
+      .innerJoin(User, 'u', 'u.id = vf.user_id')
+      .select(['u.id AS id', 'u.name AS name', 'u.avatar_url AS avatar_url', 'u.city AS city', 'vf.created_at AS followed_at'])
+      .where('vf.vendor_id = :vendorId', { vendorId })
+      .orderBy('vf.created_at', 'DESC')
+      .limit(limit)
+      .getRawMany();
 
-    const [[{ total }], [{ this_month }], [{ last_month }]] = await Promise.all([
-      this.db.query('SELECT COUNT(*) as total FROM vendor_followers WHERE vendor_id = $1', [vendorId]),
-      this.db.query(
-        `SELECT COUNT(*) as this_month FROM vendor_followers
-         WHERE vendor_id = $1 AND EXTRACT(MONTH FROM created_at)=EXTRACT(MONTH FROM NOW()) AND EXTRACT(YEAR FROM created_at)=EXTRACT(YEAR FROM NOW())`,
-        [vendorId],
-      ),
-      this.db.query(
-        `SELECT COUNT(*) as last_month FROM vendor_followers
-         WHERE vendor_id = $1 AND EXTRACT(MONTH FROM created_at)=EXTRACT(MONTH FROM NOW() - INTERVAL '1 month')
-           AND EXTRACT(YEAR FROM created_at)=EXTRACT(YEAR FROM NOW() - INTERVAL '1 month')`,
-        [vendorId],
-      ),
+    const now = new Date();
+    const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+
+    const [total, thisMonth, lastMonth] = await Promise.all([
+      this.followerRepo.count({ where: { vendor_id: vendorId } }),
+      this.followerRepo.createQueryBuilder('vf').where('vf.vendor_id = :id AND vf.created_at >= :start', { id: vendorId, start: thisMonthStart }).getCount(),
+      this.followerRepo.createQueryBuilder('vf').where('vf.vendor_id = :id AND vf.created_at >= :start AND vf.created_at < :end', { id: vendorId, start: lastMonthStart, end: thisMonthStart }).getCount(),
     ]);
 
-    const tm = +this_month, lm = +last_month;
+    const tm = thisMonth, lm = lastMonth;
     const growth_pct = lm > 0 ? Math.round(((tm - lm) / lm) * 1000) / 10 : tm > 0 ? 100 : 0;
 
-    return {
-      total: +total,
-      this_month: tm,
-      last_month: lm,
-      growth_pct,
-      followers,
-    };
+    return { total, this_month: tm, last_month: lm, growth_pct, followers };
   }
 
   async getFollowing(userId: number) {
-    return this.db.query(
-      `SELECT v.id, v.business_name, v.logo_url, v.category, v.city, vf.created_at as followed_at
-       FROM vendor_followers vf JOIN vendors v ON vf.vendor_id = v.id
-       WHERE vf.user_id = $1 ORDER BY vf.created_at DESC`,
-      [userId],
-    );
+    return this.followerRepo
+      .createQueryBuilder('vf')
+      .innerJoin(Vendor, 'v', 'v.id = vf.vendor_id')
+      .select(['v.id AS id', 'v.business_name AS business_name', 'v.logo_url AS logo_url', 'v.category AS category', 'v.city AS city', 'vf.created_at AS followed_at'])
+      .where('vf.user_id = :userId', { userId })
+      .orderBy('vf.created_at', 'DESC')
+      .getRawMany();
   }
 
   async myPlan(userId: number) {
-    const [vendor] = await this.db.query(
-      `SELECT v.subscription_plan, v.plan_expires_at, sp.*
-       FROM vendors v LEFT JOIN subscription_plans sp ON sp.slug = v.subscription_plan
-       WHERE v.user_id = $1`,
-      [userId],
-    );
+    const vendor = await this.vendorRepo
+      .createQueryBuilder('v')
+      .leftJoin(SubscriptionPlan, 'sp', 'sp.slug = v.subscription_plan')
+      .select(['v.subscription_plan AS subscription_plan', 'v.plan_expires_at AS plan_expires_at', 'sp.*'])
+      .where('v.user_id = :userId', { userId })
+      .getRawOne();
     if (!vendor) throw new NotFoundException('Vendor not found');
     return vendor;
   }
 
   async budgetSuggest(userId: number) {
-    const [vendor] = await this.db.query('SELECT id FROM vendors WHERE user_id = $1', [userId]);
+    const vendor = await this.vendorRepo.findOne({ where: { user_id: userId }, select: ['id'] });
     if (!vendor) throw new NotFoundException('Vendor not found');
 
-    const [stats] = await this.db.query(
-      `SELECT COALESCE(SUM(CASE WHEN action='view' THEN 1 ELSE 0 END),0) AS views,
-              COALESCE(SUM(CASE WHEN action='click' THEN 1 ELSE 0 END),0) AS clicks
-       FROM user_interactions ui JOIN offers o ON ui.offer_id = o.id
-       WHERE o.vendor_id = $1 AND ui.created_at >= NOW() - INTERVAL '30 days'`,
-      [vendor.id],
-    );
-    const ctr = stats.views > 0 ? (stats.clicks / stats.views) * 100 : 0;
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const stats = await this.interactionRepo
+      .createQueryBuilder('ui')
+      .innerJoin(Offer, 'o', 'o.id = ui.offer_id')
+      .select([
+        "COALESCE(SUM(CASE WHEN ui.action='view' THEN 1 ELSE 0 END),0) AS views",
+        "COALESCE(SUM(CASE WHEN ui.action='click' THEN 1 ELSE 0 END),0) AS clicks",
+      ])
+      .where('o.vendor_id = :id AND ui.created_at >= :since', { id: vendor.id, since: thirtyDaysAgo })
+      .getRawOne();
+
+    const ctr = stats?.views > 0 ? (stats.clicks / stats.views) * 100 : 0;
     const suggestedBudget = ctr > 5 ? 2000 : ctr > 2 ? 1000 : 500;
 
     return {

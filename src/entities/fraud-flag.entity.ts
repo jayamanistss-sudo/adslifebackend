@@ -3,6 +3,7 @@ import {
   PrimaryGeneratedColumn,
   Column,
   CreateDateColumn,
+  Unique,
 } from 'typeorm';
 
 export enum FraudEntityType {
@@ -17,6 +18,7 @@ export enum FraudFlagStatus {
 }
 
 @Entity('fraud_flags')
+@Unique(['entity_type', 'entity_id'])
 export class FraudFlag {
   @PrimaryGeneratedColumn()
   id: number;

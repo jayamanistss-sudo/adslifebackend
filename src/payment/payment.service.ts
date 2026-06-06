@@ -2,17 +2,24 @@ import {
   Injectable, BadRequestException, NotFoundException,
   ServiceUnavailableException,
 } from '@nestjs/common';
-import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource } from 'typeorm';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 import { PushService } from '../services/push.service';
 import axios from 'axios';
 import * as crypto from 'node:crypto';
+import { Payment, PaymentStatus } from '../entities/payment.entity';
+import { Vendor } from '../entities/vendor.entity';
+import { User } from '../entities/user.entity';
+import { SubscriptionPlan } from '../entities/subscription-plan.entity';
 
 @Injectable()
 export class PaymentService {
   constructor(
-    @InjectDataSource() private readonly db: DataSource,
+    @InjectRepository(Payment) private readonly paymentRepo: Repository<Payment>,
+    @InjectRepository(Vendor) private readonly vendorRepo: Repository<Vendor>,
+    @InjectRepository(User) private readonly userRepo: Repository<User>,
+    @InjectRepository(SubscriptionPlan) private readonly planRepo: Repository<SubscriptionPlan>,
     private readonly config: ConfigService,
     private readonly push: PushService,
   ) {}
@@ -25,19 +32,18 @@ export class PaymentService {
   private get frontendUrl() { return this.config.get<string>('frontendUrl'); }
 
   async createOrder(userId: number, planId: number, purpose = 'vendor_plan') {
-    const [plan] = await this.db.query(
-      'SELECT * FROM subscription_plans WHERE id = $1 AND is_active = true', [planId],
-    );
+    const plan = await this.planRepo.findOne({ where: { id: planId, is_active: true } });
     if (!plan) throw new NotFoundException('Plan not found');
 
-    if (Number.parseFloat(plan.price) === 0) return { free: true, plan: plan.slug };
+    if (Number.parseFloat(String(plan.price)) === 0) return { free: true, plan: plan.slug };
 
-    const [user] = await this.db.query('SELECT name, email, phone FROM users WHERE id = $1', [userId]);
+    const user = await this.userRepo.findOne({ where: { id: userId }, select: ['name', 'email', 'phone'] });
+    if (!user) throw new NotFoundException('User not found');
     const orderId = 'AL_' + crypto.randomBytes(8).toString('hex').toUpperCase();
 
     const payload = {
       order_id: orderId,
-      order_amount: Number.parseFloat(plan.price),
+      order_amount: Number.parseFloat(String(plan.price)),
       order_currency: 'INR',
       customer_details: {
         customer_id: `USR_${userId}`,
@@ -70,20 +76,23 @@ export class PaymentService {
       throw new ServiceUnavailableException('Payment gateway error: ' + (cfResponse?.message ?? 'Unknown'));
     }
 
-    await this.db.query(
-      'INSERT INTO payments (user_id, order_id, payment_session_id, amount, purpose, reference_id, reference_type) VALUES ($1,$2,$3,$4,$5,$6,$7)',
-      [userId, orderId, cfResponse.payment_session_id, plan.price, purpose, plan.id, 'vendor_plan'],
-    );
+    await this.paymentRepo.save({
+      user_id: userId,
+      order_id: orderId,
+      payment_session_id: cfResponse.payment_session_id,
+      amount: plan.price,
+      purpose,
+      reference_id: plan.id,
+      reference_type: 'vendor_plan',
+    });
 
-    return { order_id: orderId, payment_session_id: cfResponse.payment_session_id, amount: Number.parseFloat(plan.price), plan: plan.slug };
+    return { order_id: orderId, payment_session_id: cfResponse.payment_session_id, amount: Number.parseFloat(String(plan.price)), plan: plan.slug };
   }
 
   async verifyPayment(userId: number, orderId: string) {
-    const [pay] = await this.db.query(
-      'SELECT * FROM payments WHERE order_id = $1 AND user_id = $2', [orderId, userId],
-    );
+    const pay = await this.paymentRepo.findOne({ where: { order_id: orderId, user_id: userId } });
     if (!pay) throw new NotFoundException('Payment not found');
-    if (pay.status === 'paid') return { status: 'paid', order_id: orderId };
+    if (pay.status === PaymentStatus.PAID) return { status: 'paid', order_id: orderId };
 
     let cfResponse: any;
     try {
@@ -101,9 +110,9 @@ export class PaymentService {
     }
 
     if (paid) {
-      await this.db.query(
-        'UPDATE payments SET status = \'paid\', cashfree_payment_id = $1, paid_at = NOW() WHERE order_id = $2',
-        [cfPaymentId, orderId],
+      await this.paymentRepo.update(
+        { order_id: orderId },
+        { status: PaymentStatus.PAID, cashfree_payment_id: cfPaymentId, paid_at: new Date() },
       );
       await this.activateVendorPlan(pay);
       return { status: 'paid', order_id: orderId };
@@ -135,26 +144,41 @@ export class PaymentService {
 
     if (status !== 'SUCCESS' || !orderId) return 'ok';
 
-    const [pay] = await this.db.query('SELECT * FROM payments WHERE order_id = $1', [orderId]);
-    if (!pay || pay.status === 'paid') return 'ok';
+    const pay = await this.paymentRepo.findOne({ where: { order_id: orderId } });
+    if (!pay || pay.status === PaymentStatus.PAID) return 'ok';
 
-    await this.db.query(
-      'UPDATE payments SET status = \'paid\', cashfree_payment_id = $1, paid_at = NOW() WHERE order_id = $2',
-      [cfPid, orderId],
+    await this.paymentRepo.update(
+      { order_id: orderId },
+      { status: PaymentStatus.PAID, cashfree_payment_id: cfPid, paid_at: new Date() },
     );
     await this.activateVendorPlan(pay);
     return 'ok';
   }
 
-  private async activateVendorPlan(pay: any) {
+  private async activateVendorPlan(pay: Payment) {
     if (pay.reference_type !== 'vendor_plan' || !pay.reference_id) return;
-    const [plan] = await this.db.query(
-      'SELECT slug, duration_days FROM subscription_plans WHERE id = $1', [pay.reference_id],
-    );
+
+    // Guard against webhook retries re-extending an already-active plan
+    const vendor = await this.vendorRepo.findOne({
+      where: { user_id: pay.user_id },
+      select: ['id', 'subscription_plan', 'plan_expires_at'],
+    });
+    if (
+      vendor &&
+      vendor.subscription_plan === (await this.planRepo.findOne({ where: { id: pay.reference_id }, select: ['slug'] }))?.slug &&
+      vendor.plan_expires_at &&
+      vendor.plan_expires_at > new Date()
+    ) return;
+
+    const plan = await this.planRepo.findOne({
+      where: { id: pay.reference_id },
+      select: ['slug', 'duration_days'],
+    });
     if (!plan) return;
-    await this.db.query(
-      'UPDATE vendors SET subscription_plan = $1, plan_expires_at = NOW() + ($2 * INTERVAL \'1 day\') WHERE user_id = $3',
-      [plan.slug, plan.duration_days, pay.user_id],
+    const expiresAt = new Date(Date.now() + plan.duration_days * 24 * 60 * 60 * 1000);
+    await this.vendorRepo.update(
+      { user_id: pay.user_id },
+      { subscription_plan: plan.slug, plan_expires_at: expiresAt },
     );
     await this.push.send(
       +pay.user_id,

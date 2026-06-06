@@ -1,90 +1,118 @@
 import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
 import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
+import { GroupDeal, GroupDealStatus } from '../entities/group-deal.entity';
+import { GroupDealMember } from '../entities/group-deal-member.entity';
+import { Offer } from '../entities/offer.entity';
+import { Vendor } from '../entities/vendor.entity';
 
 @Injectable()
 export class GroupDealsService {
-  constructor(@InjectDataSource() private readonly db: DataSource) {}
+  constructor(
+    @InjectRepository(GroupDeal) private readonly groupDealRepo: Repository<GroupDeal>,
+    @InjectRepository(GroupDealMember) private readonly memberRepo: Repository<GroupDealMember>,
+    @InjectRepository(Offer) private readonly offerRepo: Repository<Offer>,
+    @InjectRepository(Vendor) private readonly vendorRepo: Repository<Vendor>,
+    @InjectDataSource() private readonly dataSource: DataSource,
+  ) {}
 
   async create(userId: number, userRole: string, dto: {
     offer_id: number; min_members: number; max_members?: number; duration_hours?: number;
   }) {
     if (userRole === 'admin') {
-      const [offer] = await this.db.query('SELECT id FROM offers WHERE id = $1', [dto.offer_id]);
+      const offer = await this.offerRepo.findOne({ where: { id: dto.offer_id }, select: ['id'] });
       if (!offer) throw new NotFoundException('Offer not found');
     } else {
-      const [vendor] = await this.db.query('SELECT id FROM vendors WHERE user_id = $1', [userId]);
+      const vendor = await this.vendorRepo.findOne({ where: { user_id: userId }, select: ['id'] });
       if (!vendor) throw new ForbiddenException('Vendor profile not found');
-      const [offer] = await this.db.query('SELECT id FROM offers WHERE id = $1 AND vendor_id = $2', [dto.offer_id, vendor.id]);
+      const offer = await this.offerRepo.findOne({ where: { id: dto.offer_id, vendor_id: vendor.id }, select: ['id'] });
       if (!offer) throw new NotFoundException('Offer not found or does not belong to your vendor profile');
     }
 
     const hours = dto.duration_hours ?? 24;
-    const result = await this.db.query(
-      `INSERT INTO group_deals (offer_id, min_members, max_members, status, expires_at)
-       VALUES ($1, $2, $3, 'active', NOW() + ($4 * INTERVAL '1 hour'))
-       RETURNING id`,
-      [dto.offer_id, dto.min_members, dto.max_members ?? null, hours],
-    );
-    return { id: result[0].id, offer_id: dto.offer_id, min_members: dto.min_members, expires_in_hours: hours };
+    const expiresAt = new Date(Date.now() + hours * 60 * 60 * 1000);
+    const deal = await this.groupDealRepo.save({
+      offer_id: dto.offer_id,
+      min_members: dto.min_members,
+      max_members: dto.max_members ?? null,
+      status: GroupDealStatus.ACTIVE,
+      expires_at: expiresAt,
+    });
+    return { id: deal.id, offer_id: dto.offer_id, min_members: dto.min_members, expires_in_hours: hours };
   }
 
-  async getActive(lat: number, lng: number) {
-    return this.db.query(
-      `SELECT gd.*, o.title as offer_title, o.image_url, o.discount_percent,
-              v.business_name, v.city as vendor_city,
-              (SELECT COUNT(*) FROM group_deal_members gdm WHERE gdm.deal_id = gd.id) as current_members
-       FROM group_deals gd
-       JOIN offers o ON gd.offer_id = o.id
-       JOIN vendors v ON o.vendor_id = v.id
-       WHERE gd.status = 'active'
-         AND gd.expires_at > NOW()
-       ORDER BY gd.created_at DESC`,
-    );
+  async getActive(_lat: number, _lng: number) {
+    return this.groupDealRepo
+      .createQueryBuilder('gd')
+      .innerJoin(Offer, 'o', 'o.id = gd.offer_id')
+      .innerJoin(Vendor, 'v', 'v.id = o.vendor_id')
+      .select([
+        'gd.*',
+        'o.title AS offer_title',
+        'o.image_url AS image_url',
+        'o.discount_percent AS discount_percent',
+        'v.business_name AS business_name',
+        'v.city AS vendor_city',
+        '(SELECT COUNT(*) FROM group_deal_members gdm WHERE gdm.deal_id = gd.id) AS current_members',
+      ])
+      .where("gd.status = 'active'")
+      .andWhere('gd.expires_at > NOW()')
+      .orderBy('gd.created_at', 'DESC')
+      .getRawMany();
   }
 
   async join(userId: number, dealId: number) {
-    const [deal] = await this.db.query(
-      'SELECT * FROM group_deals WHERE id = $1 AND status = \'active\' AND expires_at > NOW()',
-      [dealId],
-    );
-    if (!deal) throw new NotFoundException('Group deal not found or expired');
+    const deal = await this.groupDealRepo.findOne({
+      where: { id: dealId, status: GroupDealStatus.ACTIVE },
+    });
+    if (!deal || deal.expires_at < new Date()) throw new NotFoundException('Group deal not found or expired');
 
-    const result = await this.db.transaction(async (manager) => {
-      const [existing] = await manager.query(
-        'SELECT id FROM group_deal_members WHERE deal_id = $1 AND user_id = $2 FOR UPDATE',
-        [dealId, userId],
-      );
+    const currentMembers = await this.dataSource.transaction(async (manager) => {
+      // Row-lock the group deal to prevent concurrent over-subscription
+      const lockedDeal = await manager
+        .getRepository(GroupDeal)
+        .createQueryBuilder('gd')
+        .setLock('pessimistic_write')
+        .where('gd.id = :id', { id: dealId })
+        .getOne();
+      if (lockedDeal?.status !== GroupDealStatus.ACTIVE || lockedDeal.expires_at < new Date()) {
+        throw new NotFoundException('Group deal not found or expired');
+      }
+
+      const memberRepo = manager.getRepository(GroupDealMember);
+      const existing = await memberRepo.findOne({ where: { deal_id: dealId, user_id: userId } });
       if (existing) throw new BadRequestException('Already joined this deal');
 
-      await manager.query(
-        'INSERT INTO group_deal_members (deal_id, user_id) VALUES ($1, $2)',
-        [dealId, userId],
-      );
-
-      const [{ cnt }] = await manager.query(
-        'SELECT COUNT(*) as cnt FROM group_deal_members WHERE deal_id = $1',
-        [dealId],
-      );
-      const currentMembers = +cnt;
-
-      if (currentMembers >= deal.min_members) {
-        await manager.query('UPDATE group_deals SET status = \'fulfilled\' WHERE id = $1', [dealId]);
+      if (lockedDeal.max_members != null) {
+        const cnt = await memberRepo.count({ where: { deal_id: dealId } });
+        if (cnt >= lockedDeal.max_members) throw new BadRequestException('Group deal is full');
       }
-      return currentMembers;
+
+      await memberRepo.save({ deal_id: dealId, user_id: userId });
+
+      const cnt = await memberRepo.count({ where: { deal_id: dealId } });
+      if (cnt >= lockedDeal.min_members) {
+        await manager.getRepository(GroupDeal).update(dealId, { status: GroupDealStatus.FULFILLED });
+      }
+      return cnt;
     });
 
-    return { joined: true, current_members: result, min_members: deal.min_members, fulfilled: result >= deal.min_members };
+    return { joined: true, current_members: currentMembers, min_members: deal.min_members, fulfilled: currentMembers >= deal.min_members };
   }
 
   async status(dealId: number) {
-    const [deal] = await this.db.query(
-      `SELECT gd.*, o.title as offer_title, o.discount_percent,
-              (SELECT COUNT(*) FROM group_deal_members gdm WHERE gdm.deal_id = gd.id) as current_members
-       FROM group_deals gd JOIN offers o ON gd.offer_id = o.id
-       WHERE gd.id = $1`,
-      [dealId],
-    );
+    const deal = await this.groupDealRepo
+      .createQueryBuilder('gd')
+      .innerJoin(Offer, 'o', 'o.id = gd.offer_id')
+      .select([
+        'gd.*',
+        'o.title AS offer_title',
+        'o.discount_percent AS discount_percent',
+        '(SELECT COUNT(*) FROM group_deal_members gdm WHERE gdm.deal_id = gd.id) AS current_members',
+      ])
+      .where('gd.id = :id', { id: dealId })
+      .getRawOne();
     if (!deal) throw new NotFoundException('Deal not found');
     return deal;
   }

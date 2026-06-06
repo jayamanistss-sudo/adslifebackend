@@ -1,57 +1,42 @@
 import { Injectable } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
 import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
+import { Offer } from '../entities/offer.entity';
+import { UserPreference } from '../entities/user-preference.entity';
+import { SavedOffer } from '../entities/saved-offer.entity';
+import { UserInteraction } from '../entities/user-interaction.entity';
+import { Vendor } from '../entities/vendor.entity';
 
 @Injectable()
 export class FeedService {
-  constructor(@InjectDataSource() private readonly db: DataSource) {}
+  constructor(
+    @InjectRepository(Offer) private readonly offerRepo: Repository<Offer>,
+    @InjectRepository(UserPreference) private readonly userPrefRepo: Repository<UserPreference>,
+    @InjectRepository(SavedOffer) private readonly savedOfferRepo: Repository<SavedOffer>,
+    @InjectRepository(UserInteraction) private readonly userInteractionRepo: Repository<UserInteraction>,
+    @InjectDataSource() private readonly dataSource: DataSource,
+  ) {}
 
   async totalActiveOffers(): Promise<number> {
-    const [{ total }] = await this.db.query(
-      `SELECT COUNT(*) as total FROM offers o
-       JOIN vendors v ON o.vendor_id = v.id
-       WHERE o.is_active = true
-         AND (o.valid_until IS NULL OR o.valid_until >= NOW())
-         AND v.status = 'approved'`,
-    );
-    return +total;
+    return this.offerRepo
+      .createQueryBuilder('o')
+      .innerJoin('vendors', 'v', 'v.id = o.vendor_id')
+      .where('o.is_active = true')
+      .andWhere('(o.valid_until IS NULL OR o.valid_until >= NOW())')
+      .andWhere("v.status = 'approved'")
+      .getCount();
   }
 
   async personalized(userId: number, lat: number, lng: number, page: number, perPage = 20, search = '') {
     const limit = perPage;
     const offset = (page - 1) * limit;
 
-    const [prefs] = await this.db.query('SELECT * FROM user_preferences WHERE user_id = $1', [userId]);
+    const prefs = await this.userPrefRepo.findOne({ where: { user_id: userId } });
     const safeJson = (v: any): any[] => { try { const p = JSON.parse(v ?? '[]'); return Array.isArray(p) ? p : []; } catch { return []; } };
     const preferredCategories: string[] = safeJson(prefs?.preferred_categories);
     const preferredVendors: number[] = safeJson(prefs?.preferred_vendors);
 
-    // Build params properly
-    const buildParams = () => {
-      const p: any[] = [];
-      const catPH = preferredCategories.length
-        ? preferredCategories.map((c) => { p.push(c); return `$${p.length}`; }).join(',')
-        : null;
-      const vendorPH = preferredVendors.length
-        ? preferredVendors.map((v) => { p.push(v); return `$${p.length}`; }).join(',')
-        : null;
-
-      let searchClause = '';
-      let searchParams: any[] = [];
-      if (search) {
-        const s = `%${search}%`;
-        searchParams = [s, s, s, s];
-        const base = p.length;
-        searchClause = `AND (o.title LIKE $${base + 1} OR v.business_name LIKE $${base + 2} OR o.category LIKE $${base + 3} OR o.description LIKE $${base + 4})`;
-        for (const sp of searchParams) p.push(sp);
-      }
-
-      return { p, catPH, vendorPH, searchClause, searchParams };
-    };
-
-    const { p: allParams, catPH, vendorPH, searchClause } = buildParams();
-
-    // Distance score: buckets using Haversine approximation in SQL
     const distExpr = lat && lng
       ? `(6371 * ACOS(GREATEST(-1, LEAST(1,
            COS(RADIANS(${lat})) * COS(RADIANS(v.lat)) *
@@ -71,12 +56,12 @@ export class FeedService {
          END`
       : '0.20';
 
-    const catScore = catPH
-      ? `CASE WHEN o.category IN (${catPH}) THEN 0.35 WHEN o.category IS NOT NULL THEN 0.105 ELSE 0 END`
+    const catScore = preferredCategories.length
+      ? `CASE WHEN o.category IN (${preferredCategories.map(c => `'${c.replace(/'/g, "''")}'`).join(',')}) THEN 0.35 WHEN o.category IS NOT NULL THEN 0.105 ELSE 0 END`
       : `CASE WHEN o.category IS NOT NULL THEN 0.105 ELSE 0 END`;
 
-    const vendorScore = vendorPH
-      ? `CASE WHEN o.vendor_id IN (${vendorPH}) THEN 0.10 ELSE 0 END`
+    const vendorScore = preferredVendors.length
+      ? `CASE WHEN o.vendor_id IN (${preferredVendors.join(',')}) THEN 0.10 ELSE 0 END`
       : '0';
 
     const recencyScore = `CASE
@@ -91,43 +76,56 @@ export class FeedService {
 
     const scoreExpr = `(${catScore} + ${distScore} + ${discountScore} + ${recencyScore} + ${vendorScore} + ${featuredBonus})`;
 
-    // Build search-only params for count query
-    const searchOnlyParams: any[] = [];
-    let searchOnlyClause = '';
+    const qb = this.dataSource
+      .createQueryBuilder()
+      .select('o.*')
+      .addSelect('v.business_name', 'business_name')
+      .addSelect('v.logo_url', 'vendor_logo')
+      .addSelect('v.lat', 'vlat')
+      .addSelect('v.lng', 'vlng')
+      .addSelect('v.category', 'vendor_category')
+      .addSelect('v.city', 'vendor_city')
+      .addSelect('v.address', 'vendor_address')
+      .addSelect('v.phone', 'vendor_phone')
+      .addSelect('v.website', 'vendor_website')
+      .addSelect(distExpr !== 'NULL' ? `ROUND(${distExpr}::numeric, 1)` : 'NULL', 'distance')
+      .addSelect(`ROUND((${scoreExpr})::numeric, 4)`, 'score')
+      .from(Offer, 'o')
+      .innerJoin(Vendor, 'v', 'v.id = o.vendor_id')
+      .where('o.is_active = true')
+      .andWhere('(o.valid_until IS NULL OR o.valid_until >= NOW())')
+      .andWhere("v.status = 'approved'");
+
     if (search) {
       const s = `%${search}%`;
-      searchOnlyParams.push(s, s, s, s);
-      searchOnlyClause = `AND (o.title LIKE $1 OR v.business_name LIKE $2 OR o.category LIKE $3 OR o.description LIKE $4)`;
+      qb.andWhere('(o.title LIKE :s1 OR v.business_name LIKE :s2 OR o.category LIKE :s3 OR o.description LIKE :s4)',
+        { s1: s, s2: s, s3: s, s4: s });
     }
 
-    const [{ total }] = await this.db.query(
-      `SELECT COUNT(*) as total FROM offers o JOIN vendors v ON o.vendor_id = v.id
-       WHERE o.is_active = true AND (o.valid_until IS NULL OR o.valid_until >= NOW())
-         AND v.status = 'approved' ${searchOnlyClause}`,
-      searchOnlyParams,
-    );
+    const countQb = this.dataSource
+      .createQueryBuilder()
+      .select('COUNT(*)', 'total')
+      .from(Offer, 'o')
+      .innerJoin(Vendor, 'v', 'v.id = o.vendor_id')
+      .where('o.is_active = true')
+      .andWhere('(o.valid_until IS NULL OR o.valid_until >= NOW())')
+      .andWhere("v.status = 'approved'");
 
-    // Add limit and offset to allParams
-    const limitIdx = allParams.length + 1;
-    const offsetIdx = allParams.length + 2;
+    if (search) {
+      const s = `%${search}%`;
+      countQb.andWhere('(o.title LIKE :s1 OR v.business_name LIKE :s2 OR o.category LIKE :s3 OR o.description LIKE :s4)',
+        { s1: s, s2: s, s3: s, s4: s });
+    }
 
-    const offers = await this.db.query(
-      `SELECT o.*, v.business_name, v.logo_url as vendor_logo,
-              v.lat as vlat, v.lng as vlng, v.category as vendor_category,
-              v.city as vendor_city, v.address as vendor_address,
-              v.phone as vendor_phone, v.website as vendor_website,
-              ${distExpr !== 'NULL' ? `ROUND(${distExpr}::numeric, 1)` : 'NULL'} as distance,
-              ROUND((${scoreExpr})::numeric, 4) as score
-       FROM offers o
-       JOIN vendors v ON o.vendor_id = v.id
-       WHERE o.is_active = true
-         AND (o.valid_until IS NULL OR o.valid_until >= NOW())
-         AND v.status = 'approved'
-         ${searchClause}
-       ORDER BY score DESC, o.is_featured DESC, o.created_at DESC
-       LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
-      [...allParams, limit, offset],
-    );
+    const { total } = await countQb.getRawOne();
+
+    const offers = await qb
+      .orderBy('score', 'DESC')
+      .addOrderBy('o.is_featured', 'DESC')
+      .addOrderBy('o.created_at', 'DESC')
+      .limit(limit)
+      .offset(offset)
+      .getRawMany();
 
     return { offers, total: +total };
   }
@@ -135,23 +133,6 @@ export class FeedService {
   async trending(city: string, lat: number, lng: number, page: number, perPage = 20, search = '') {
     const limit = perPage;
     const offset = (page - 1) * limit;
-
-    const params: any[] = [];
-    const clauses: string[] = [];
-    if (city) { params.push(city); clauses.push(`(v.city = $${params.length} OR o.category IS NOT NULL)`); }
-    if (search) {
-      const s = `%${search}%`;
-      params.push(s, s, s);
-      clauses.push(`(o.title LIKE $${params.length - 2} OR v.business_name LIKE $${params.length - 1} OR o.category LIKE $${params.length})`);
-    }
-    const whereExtra = clauses.length ? 'AND ' + clauses.join(' AND ') : '';
-
-    const [{ total }] = await this.db.query(
-      `SELECT COUNT(*) as total FROM offers o JOIN vendors v ON o.vendor_id = v.id
-       WHERE o.is_active = true AND (o.valid_until IS NULL OR o.valid_until >= NOW())
-         AND v.status = 'approved' ${whereExtra}`,
-      params,
-    );
 
     const distExpr = lat && lng
       ? `ROUND((6371 * ACOS(GREATEST(-1, LEAST(1,
@@ -161,22 +142,52 @@ export class FeedService {
          ))))::numeric, 1)`
       : 'NULL';
 
-    const limitIdx = params.length + 1;
-    const offsetIdx = params.length + 2;
+    const qb = this.dataSource
+      .createQueryBuilder()
+      .select('o.*')
+      .addSelect('v.business_name', 'business_name')
+      .addSelect('v.logo_url', 'vendor_logo')
+      .addSelect('v.city', 'vendor_city')
+      .addSelect(distExpr, 'distance')
+      .from(Offer, 'o')
+      .innerJoin(Vendor, 'v', 'v.id = o.vendor_id')
+      .where('o.is_active = true')
+      .andWhere('(o.valid_until IS NULL OR o.valid_until >= NOW())')
+      .andWhere("v.status = 'approved'");
 
-    const offers = await this.db.query(
-      `SELECT o.*, v.business_name, v.logo_url as vendor_logo,
-              v.city as vendor_city, ${distExpr} as distance
-       FROM offers o
-       JOIN vendors v ON o.vendor_id = v.id
-       WHERE o.is_active = true
-         AND (o.valid_until IS NULL OR o.valid_until >= NOW())
-         AND v.status = 'approved'
-         ${whereExtra}
-       ORDER BY (o.views + o.clicks * 2 + o.saves * 3) DESC, o.created_at DESC
-       LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
-      [...params, limit, offset],
-    );
+    if (city) {
+      qb.andWhere('(v.city = :city OR o.category IS NOT NULL)', { city });
+    }
+    if (search) {
+      const s = `%${search}%`;
+      qb.andWhere('(o.title LIKE :s1 OR v.business_name LIKE :s2 OR o.category LIKE :s3)', { s1: s, s2: s, s3: s });
+    }
+
+    const countQb = this.dataSource
+      .createQueryBuilder()
+      .select('COUNT(*)', 'total')
+      .from(Offer, 'o')
+      .innerJoin(Vendor, 'v', 'v.id = o.vendor_id')
+      .where('o.is_active = true')
+      .andWhere('(o.valid_until IS NULL OR o.valid_until >= NOW())')
+      .andWhere("v.status = 'approved'");
+
+    if (city) {
+      countQb.andWhere('(v.city = :city OR o.category IS NOT NULL)', { city });
+    }
+    if (search) {
+      const s = `%${search}%`;
+      countQb.andWhere('(o.title LIKE :s1 OR v.business_name LIKE :s2 OR o.category LIKE :s3)', { s1: s, s2: s, s3: s });
+    }
+
+    const { total } = await countQb.getRawOne();
+
+    const offers = await qb
+      .orderBy('(o.views + o.clicks * 2 + o.saves * 3)', 'DESC')
+      .addOrderBy('o.created_at', 'DESC')
+      .limit(limit)
+      .offset(offset)
+      .getRawMany();
 
     return { offers, total: +total };
   }
@@ -184,57 +195,79 @@ export class FeedService {
   async nearby(lat: number, lng: number, radiusKm: number, page: number) {
     const limit = 100;
     const offset = (page - 1) * limit;
+    const distExpr = `(6371 * ACOS(GREATEST(-1, LEAST(1,
+      COS(RADIANS(:lat)) * COS(RADIANS(v.lat)) *
+      COS(RADIANS(v.lng) - RADIANS(:lng)) +
+      SIN(RADIANS(:lat)) * SIN(RADIANS(v.lat))
+    ))))`;
 
-    const offers = await this.db.query(
-      `SELECT * FROM (
-         SELECT o.*, v.business_name, v.logo_url as vendor_logo,
-                v.lat as vlat, v.lng as vlng, v.city as vendor_city,
-                (6371 * ACOS(GREATEST(-1, LEAST(1,
-                  COS(RADIANS($1)) * COS(RADIANS(v.lat)) *
-                  COS(RADIANS(v.lng) - RADIANS($2)) +
-                  SIN(RADIANS($1)) * SIN(RADIANS(v.lat))
-                )))) AS distance
-         FROM offers o
-         JOIN vendors v ON o.vendor_id = v.id
-         WHERE o.is_active = true
-           AND (o.valid_until IS NULL OR o.valid_until >= NOW())
-           AND v.status = 'approved'
-           AND v.lat IS NOT NULL AND v.lng IS NOT NULL
-       ) sub
-       WHERE sub.distance <= $3
-       ORDER BY sub.distance ASC, sub.created_at DESC
-       LIMIT $4 OFFSET $5`,
-      [lat, lng, radiusKm, limit, offset],
-    );
+    const offers = await this.dataSource
+      .createQueryBuilder()
+      .select('o.id', 'id')
+      .addSelect('o.title', 'title')
+      .addSelect('o.description', 'description')
+      .addSelect('o.category', 'category')
+      .addSelect('o.discount_percent', 'discount_percent')
+      .addSelect('o.offer_price', 'offer_price')
+      .addSelect('o.original_price', 'original_price')
+      .addSelect('o.image_url', 'image_url')
+      .addSelect('o.valid_until', 'valid_until')
+      .addSelect('o.views', 'views')
+      .addSelect('o.vendor_id', 'vendor_id')
+      .addSelect('v.business_name', 'business_name')
+      .addSelect('v.logo_url', 'vendor_logo')
+      .addSelect('v.lat', 'vlat')
+      .addSelect('v.lng', 'vlng')
+      .addSelect('v.city', 'vendor_city')
+      .addSelect(distExpr, 'distance')
+      .from(Offer, 'o')
+      .innerJoin(Vendor, 'v', 'v.id = o.vendor_id')
+      .where('o.is_active = true')
+      .andWhere('(o.valid_until IS NULL OR o.valid_until >= NOW())')
+      .andWhere("v.status = 'approved'")
+      .andWhere('v.lat IS NOT NULL AND v.lng IS NOT NULL')
+      .andWhere(`${distExpr} <= :radius`)
+      .setParameters({ lat, lng, radius: radiusKm })
+      .orderBy(distExpr, 'ASC')
+      .addOrderBy('o.created_at', 'DESC')
+      .limit(limit)
+      .offset(offset)
+      .getRawMany();
+
     return offers;
   }
 
   async saved(userId: number, page: number) {
     const limit = 100;
     const offset = (page - 1) * limit;
-    return this.db.query(
-      `SELECT o.*, v.business_name, v.logo_url as vendor_logo, v.city as vendor_city
-       FROM saved_offers so
-       JOIN offers o ON so.offer_id = o.id
-       JOIN vendors v ON o.vendor_id = v.id
-       WHERE so.user_id = $1
-       ORDER BY so.created_at DESC
-       LIMIT $2 OFFSET $3`,
-      [userId, limit, offset],
-    );
+
+    return this.dataSource
+      .createQueryBuilder()
+      .select('o.*')
+      .addSelect('v.business_name', 'business_name')
+      .addSelect('v.logo_url', 'vendor_logo')
+      .addSelect('v.city', 'vendor_city')
+      .from(SavedOffer, 'so')
+      .innerJoin(Offer, 'o', 'so.offer_id = o.id')
+      .innerJoin(Vendor, 'v', 'o.vendor_id = v.id')
+      .where('so.user_id = :userId', { userId })
+      .orderBy('so.created_at', 'DESC')
+      .limit(limit)
+      .offset(offset)
+      .getRawMany();
   }
 
   async unsave(userId: number, offerId: number) {
-    await this.db.query('DELETE FROM saved_offers WHERE user_id = $1 AND offer_id = $2', [userId, offerId]);
-    await this.db.query('UPDATE offers SET saves = GREATEST(0, saves - 1) WHERE id = $1', [offerId]);
+    await this.savedOfferRepo.delete({ user_id: userId, offer_id: offerId });
+    await this.offerRepo.decrement({ id: offerId }, 'saves', 1);
     return { removed: true };
   }
 
   async savedIds(userId: number) {
-    const rows = await this.db.query(
-      'SELECT offer_id FROM saved_offers WHERE user_id = $1',
-      [userId],
-    );
+    const rows = await this.savedOfferRepo.find({
+      where: { user_id: userId },
+      select: ['offer_id'],
+    });
     return rows.map((r: any) => r.offer_id);
   }
 
@@ -242,43 +275,59 @@ export class FeedService {
     const validActions = ['view', 'click', 'save', 'redeem', 'share', 'skip'];
     if (!validActions.includes(action)) throw new Error('Invalid action');
 
-    const [offer] = await this.db.query('SELECT category, vendor_id FROM offers WHERE id = $1', [offerId]);
+    const offer = await this.offerRepo.findOne({
+      where: { id: offerId },
+      select: ['id', 'category', 'vendor_id', 'max_redemptions', 'current_redemptions'],
+    });
     if (!offer) throw new Error('Offer not found');
 
-    await this.db.query(
-      'INSERT INTO user_interactions (user_id, offer_id, action, category) VALUES ($1,$2,$3,$4)',
-      [userId, offerId, action, offer.category],
-    );
+    await this.userInteractionRepo.save({
+      user_id: userId,
+      offer_id: offerId,
+      action: action as any,
+      category: offer.category,
+    });
 
     const colMap: Record<string, string> = { view: 'views', click: 'clicks', save: 'saves' };
     if (colMap[action]) {
-      await this.db.query(
-        `UPDATE offers SET ${colMap[action]} = ${colMap[action]} + 1 WHERE id = $1`,
-        [offerId],
-      );
+      if (action === 'view') {
+        // Deduplicate views per user per offer within a 24-hour window
+        const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+        const recentView = await this.userInteractionRepo
+          .createQueryBuilder('ui')
+          .where('ui.user_id = :userId AND ui.offer_id = :offerId AND ui.action = :action AND ui.created_at >= :since', {
+            userId, offerId, action: 'view', since,
+          })
+          .getCount();
+        if (recentView <= 1) {
+          await this.offerRepo.increment({ id: offerId }, 'views', 1);
+        }
+      } else {
+        await this.offerRepo.increment({ id: offerId }, colMap[action], 1);
+      }
     }
 
     if (action === 'save') {
-      await this.db.query(
-        'INSERT INTO saved_offers (user_id, offer_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
-        [userId, offerId],
-      );
+      await this.savedOfferRepo
+        .createQueryBuilder()
+        .insert()
+        .into(SavedOffer)
+        .values({ user_id: userId, offer_id: offerId })
+        .orIgnore()
+        .execute();
     }
     if (action === 'redeem') {
-      const [offerRow] = await this.db.query(
-        'SELECT max_redemptions, current_redemptions FROM offers WHERE id = $1',
-        [offerId],
-      );
-      if (offerRow && offerRow.max_redemptions > 0 && offerRow.current_redemptions >= offerRow.max_redemptions) {
+      const fresh = await this.offerRepo.findOne({
+        where: { id: offerId },
+        select: ['id', 'max_redemptions', 'current_redemptions'],
+      });
+      if (fresh && (fresh.max_redemptions ?? 0) > 0 && (fresh.current_redemptions ?? 0) >= (fresh.max_redemptions ?? 0)) {
         throw new Error('Redemption limit reached');
       }
-      await this.db.query(
-        'UPDATE offers SET current_redemptions = current_redemptions + 1 WHERE id = $1',
-        [offerId],
-      );
+      await this.offerRepo.increment({ id: offerId }, 'current_redemptions', 1);
     }
 
-    await this.updatePreferences(userId, offer.category, offerId, action);
+    if (offer.category) await this.updatePreferences(userId, offer.category, offerId, action);
     return { recorded: true, vendor_id: offer.vendor_id };
   }
 
@@ -287,7 +336,7 @@ export class FeedService {
     if (weight === 0) return;
 
     const safeJson = (v: any): any[] => { try { const p = JSON.parse(v ?? '[]'); return Array.isArray(p) ? p : []; } catch { return []; } };
-    const [row] = await this.db.query('SELECT * FROM user_preferences WHERE user_id = $1', [userId]);
+    const row = await this.userPrefRepo.findOne({ where: { user_id: userId } });
     let categories: string[] = safeJson(row?.preferred_categories);
 
     if (weight > 0 && category && !categories.includes(category)) {
@@ -298,15 +347,16 @@ export class FeedService {
     }
 
     if (row) {
-      await this.db.query(
-        'UPDATE user_preferences SET preferred_categories=$1, updated_at=NOW() WHERE user_id=$2',
-        [JSON.stringify(categories), userId],
+      await this.userPrefRepo.update(
+        { user_id: userId },
+        { preferred_categories: JSON.stringify(categories) as any },
       );
     } else {
-      await this.db.query(
-        'INSERT INTO user_preferences (user_id, preferred_categories, preferred_vendors) VALUES ($1,$2,$3)',
-        [userId, JSON.stringify(categories), '[]'],
-      );
+      await this.userPrefRepo.save({
+        user_id: userId,
+        preferred_categories: JSON.stringify(categories) as any,
+        preferred_vendors: '[]' as any,
+      });
     }
   }
 }

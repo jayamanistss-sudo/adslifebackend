@@ -22,6 +22,9 @@ export class GroupDeal {
   @Column({ type: 'int', default: 5 })
   min_members: number;
 
+  @Column({ type: 'int', nullable: true })
+  max_members: number | null;
+
   @Column({ type: 'enum', enum: GroupDealStatus, nullable: true, default: GroupDealStatus.ACTIVE })
   status: GroupDealStatus | null;
 

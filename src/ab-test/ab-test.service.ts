@@ -1,36 +1,52 @@
 import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
-import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource } from 'typeorm';
+import { InjectRepository } from '@nestjs/typeorm';
+import { MoreThanOrEqual, Repository } from 'typeorm';
+import { AbTest } from '../entities/ab-test.entity';
+import { UserInteraction, InteractionAction } from '../entities/user-interaction.entity';
+import { Offer } from '../entities/offer.entity';
 
 @Injectable()
 export class AbTestService {
-  constructor(@InjectDataSource() private readonly db: DataSource) {}
+  constructor(
+    @InjectRepository(AbTest) private readonly abTestRepo: Repository<AbTest>,
+    @InjectRepository(UserInteraction) private readonly userInteractionRepo: Repository<UserInteraction>,
+    @InjectRepository(Offer) private readonly offerRepo: Repository<Offer>,
+  ) {}
 
   async create(vendorId: number, dto: {
     name: string; offer_id_a: number; offer_id_b: number; duration_days?: number;
   }) {
     const durationDays = dto.duration_days ?? 7;
-    const result = await this.db.query(
-      `INSERT INTO ab_tests (vendor_id, name, offer_id_a, offer_id_b, status, ends_at)
-       VALUES ($1, $2, $3, $4, 'running', NOW() + ($5 * INTERVAL '1 day'))
-       RETURNING id`,
-      [vendorId, dto.name, dto.offer_id_a, dto.offer_id_b, durationDays],
-    );
-    return { id: result[0].id };
+    const endsAt = new Date(Date.now() + durationDays * 24 * 60 * 60 * 1000);
+    const saved = await this.abTestRepo.save({
+      vendor_id: vendorId,
+      name: dto.name,
+      offer_id_a: dto.offer_id_a,
+      offer_id_b: dto.offer_id_b,
+      status: 'running' as any,
+      ends_at: endsAt,
+    });
+    return { id: saved.id };
   }
 
   async results(testId: number, vendorId: number, role: string) {
-    const [test] = await this.db.query('SELECT * FROM ab_tests WHERE id = $1', [testId]);
+    const test = await this.abTestRepo.findOne({ where: { id: testId } });
     if (!test) throw new NotFoundException('A/B test not found');
     if (role !== 'admin' && test.vendor_id !== vendorId) throw new ForbiddenException('Access denied');
 
     const statsFor = async (offerId: number) => {
-      const [[views], [clicks], [saves]] = await Promise.all([
-        this.db.query('SELECT COUNT(*) as cnt FROM user_interactions WHERE offer_id = $1 AND action = \'view\' AND created_at >= $2', [offerId, test.created_at]),
-        this.db.query('SELECT COUNT(*) as cnt FROM user_interactions WHERE offer_id = $1 AND action = \'click\' AND created_at >= $2', [offerId, test.created_at]),
-        this.db.query('SELECT COUNT(*) as cnt FROM user_interactions WHERE offer_id = $1 AND action = \'save\' AND created_at >= $2', [offerId, test.created_at]),
+      const [views, clicks, saves] = await Promise.all([
+        this.userInteractionRepo.count({
+          where: { offer_id: offerId, action: InteractionAction.VIEW, created_at: MoreThanOrEqual(test.created_at) },
+        }),
+        this.userInteractionRepo.count({
+          where: { offer_id: offerId, action: InteractionAction.CLICK, created_at: MoreThanOrEqual(test.created_at) },
+        }),
+        this.userInteractionRepo.count({
+          where: { offer_id: offerId, action: InteractionAction.SAVE, created_at: MoreThanOrEqual(test.created_at) },
+        }),
       ]);
-      const v = +views.cnt, c = +clicks.cnt, s = +saves.cnt;
+      const v = views, c = clicks, s = saves;
       return { views: v, clicks: c, saves: s, ctr: v > 0 ? Math.round((c / v) * 10000) / 100 : 0 };
     };
 
@@ -44,7 +60,7 @@ export class AbTestService {
   }
 
   async conclude(testId: number, winnerVariant: 'A' | 'B', vendorId: number, role: string) {
-    const [test] = await this.db.query('SELECT * FROM ab_tests WHERE id = $1', [testId]);
+    const test = await this.abTestRepo.findOne({ where: { id: testId } });
     if (!test) throw new NotFoundException('A/B test not found');
     if (role !== 'admin' && test.vendor_id !== vendorId) throw new ForbiddenException('Access denied');
     if (test.status !== 'running') throw new BadRequestException('Test is not running');
@@ -52,11 +68,12 @@ export class AbTestService {
     const winnerOfferId = winnerVariant === 'A' ? test.offer_id_a : test.offer_id_b;
     const loserOfferId = winnerVariant === 'A' ? test.offer_id_b : test.offer_id_a;
 
-    await this.db.query(
-      'UPDATE ab_tests SET status = \'concluded\', winner_offer_id = $1, concluded_at = NOW() WHERE id = $2',
-      [winnerOfferId, testId],
-    );
-    await this.db.query('UPDATE offers SET is_active = false WHERE id = $1', [loserOfferId]);
+    await this.abTestRepo.update(testId, {
+      status: 'concluded' as any,
+      winner_offer_id: winnerOfferId,
+      concluded_at: new Date(),
+    });
+    await this.offerRepo.update(loserOfferId, { is_active: false });
 
     return { concluded: true, winner_offer_id: winnerOfferId };
   }

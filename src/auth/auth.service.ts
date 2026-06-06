@@ -4,11 +4,13 @@ import {
   UnauthorizedException,
   ConflictException,
   ForbiddenException,
+  NotFoundException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
+import { InjectRepository } from '@nestjs/typeorm';
 import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource } from 'typeorm';
+import { DataSource, IsNull, MoreThan, Repository } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
 import * as jwt from 'jsonwebtoken';
@@ -18,11 +20,19 @@ import { RegisterDto } from './dto/register.dto';
 import { BecomeVendorDto } from './dto/google-auth.dto';
 import { ReferralService } from '../referral/referral.service';
 import { MonitoringService } from '../monitoring/monitoring.service';
+import { User } from '../entities/user.entity';
+import { Vendor } from '../entities/vendor.entity';
+import { UserPreference } from '../entities/user-preference.entity';
+import { PasswordReset } from '../entities/password-reset.entity';
 
 @Injectable()
 export class AuthService {
   constructor(
-    @InjectDataSource() private readonly db: DataSource,
+    @InjectRepository(User) private readonly userRepo: Repository<User>,
+    @InjectRepository(Vendor) private readonly vendorRepo: Repository<Vendor>,
+    @InjectRepository(UserPreference) private readonly userPrefRepo: Repository<UserPreference>,
+    @InjectRepository(PasswordReset) private readonly passwordResetRepo: Repository<PasswordReset>,
+    @InjectDataSource() private readonly dataSource: DataSource,
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
     private readonly referral: ReferralService,
@@ -30,10 +40,10 @@ export class AuthService {
   ) {}
 
   async login(dto: LoginDto, ctx?: { ip: string; ua: string; requestId?: string }) {
-    const [user] = await this.db.query(
-      'SELECT id, name, email, password_hash, role, city, lat, lng, avatar_url FROM users WHERE email = $1 AND is_active = true',
-      [dto.email.trim()],
-    );
+    const user = await this.userRepo.findOne({
+      where: { email: dto.email.trim(), is_active: true },
+      select: ['id', 'name', 'email', 'password_hash', 'role', 'city', 'lat', 'lng', 'avatar_url'],
+    });
     if (!user?.password_hash) {
       setImmediate(() => this.monitoring.logAuth({
         requestId: ctx?.requestId, email: dto.email, action: 'login_failure',
@@ -53,40 +63,51 @@ export class AuthService {
       });
       throw new UnauthorizedException('Invalid credentials');
     }
-    await this.db.query(
-      'UPDATE users SET last_login = CURRENT_DATE, login_count = login_count + 1 WHERE id = $1',
-      [user.id],
-    );
+    await this.userRepo.increment({ id: user.id }, 'login_count', 1);
+    await this.userRepo.update(user.id, { last_login: new Date() });
     setImmediate(() => this.monitoring.logAuth({
       requestId: ctx?.requestId, userId: user.id, email: user.email,
       role: user.role, action: 'login_success',
       ipAddress: ctx?.ip ?? '0.0.0.0', userAgent: ctx?.ua,
     }).catch(() => {}));
     const token = this.generateToken(user.id, user.role);
-    delete user.password_hash;
-    return { user, token };
+    const { password_hash: _pw, ...userOut } = user as any;
+    return { user: userOut, token };
   }
 
   async register(dto: RegisterDto, ctx?: { ip: string; ua: string; requestId?: string }) {
     if (!dto.name || !dto.email || !dto.password) {
       throw new BadRequestException('Name, email and password are required');
     }
-    const [existing] = await this.db.query('SELECT id FROM users WHERE email = $1', [dto.email]);
+    const existing = await this.userRepo.findOne({ where: { email: dto.email }, select: ['id'] });
     if (existing) throw new ConflictException('Email already registered');
 
     const hash = await bcrypt.hash(dto.password, 10);
     const role = 'user';
 
-    const userId: number = await this.db.transaction(async (manager) => {
-      const result = await manager.query(
-        'INSERT INTO users (name, email, phone, password_hash, city, role) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id',
-        [dto.name.trim(), dto.email.trim(), dto.phone?.trim() || null, hash, dto.city?.trim() || null, role],
-      );
-      const newId: number = result[0].id;
-      await manager.query(
-        'INSERT INTO user_preferences (user_id, preferred_categories, preferred_vendors) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING',
-        [newId, '[]', '[]'],
-      );
+    const userId: number = await this.dataSource.transaction(async (manager) => {
+      const userRepo = manager.getRepository(User);
+      const userPrefRepo = manager.getRepository(UserPreference);
+
+      const newUser = userRepo.create({
+        name: dto.name.trim(),
+        email: dto.email.trim(),
+        phone: dto.phone?.trim() || null,
+        password_hash: hash,
+        city: dto.city?.trim() || null,
+        role: role as any,
+      });
+      const saved = await userRepo.save(newUser);
+      const newId: number = saved.id;
+
+      await userPrefRepo
+        .createQueryBuilder()
+        .insert()
+        .into(UserPreference)
+        .values({ user_id: newId, preferred_categories: '[]' as any, preferred_vendors: '[]' as any })
+        .orIgnore()
+        .execute();
+
       return newId;
     });
 
@@ -109,16 +130,15 @@ export class AuthService {
     );
     if (!profile?.email) throw new BadRequestException('Invalid Google token');
 
-    // Verify token audience matches this app's client ID
     const clientId = this.config.get<string>('googleClientId');
     if (clientId && profile.aud && profile.aud !== clientId) {
       throw new UnauthorizedException('Google token was not issued for this application');
     }
 
-    const [existing] = await this.db.query(
-      'SELECT id, name, email, role, avatar_url FROM users WHERE email = $1',
-      [profile.email],
-    );
+    const existing = await this.userRepo.findOne({
+      where: { email: profile.email },
+      select: ['id', 'name', 'email', 'role', 'avatar_url'],
+    });
 
     let userId: number;
     let role = 'user';
@@ -126,68 +146,73 @@ export class AuthService {
     if (existing) {
       userId = existing.id;
       role = existing.role;
-      await this.db.query(
-        'UPDATE users SET last_login = CURRENT_DATE, login_count = login_count + 1, avatar_url = COALESCE(avatar_url, $1) WHERE id = $2',
-        [profile.picture || null, userId],
-      );
+      await this.userRepo.increment({ id: userId }, 'login_count', 1);
+      await this.userRepo.update(userId, {
+        last_login: new Date(),
+        avatar_url: existing.avatar_url ?? (profile.picture || null),
+      });
     } else {
-      const result = await this.db.query(
-        'INSERT INTO users (name, email, avatar_url, role, google_id) VALUES ($1, $2, $3, \'user\', $4) RETURNING id',
-        [profile.name || profile.email, profile.email, profile.picture || null, profile.sub || null],
-      );
-      userId = result[0].id;
-      await this.db.query(
-        'INSERT INTO user_preferences (user_id, preferred_categories, preferred_vendors) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING',
-        [userId, '[]', '[]'],
-      );
+      const newUser = this.userRepo.create({
+        name: profile.name || profile.email,
+        email: profile.email,
+        avatar_url: profile.picture || null,
+        role: 'user' as any,
+        google_id: profile.sub || null,
+      });
+      const saved = await this.userRepo.save(newUser);
+      userId = saved.id;
+
+      await this.userPrefRepo
+        .createQueryBuilder()
+        .insert()
+        .into(UserPreference)
+        .values({ user_id: userId, preferred_categories: '[]' as any, preferred_vendors: '[]' as any })
+        .orIgnore()
+        .execute();
     }
 
     const token = this.generateToken(userId, role);
-    const [user] = await this.db.query(
-      'SELECT id, name, email, role, avatar_url FROM users WHERE id = $1',
-      [userId],
-    );
+    const user = await this.userRepo.findOne({
+      where: { id: userId },
+      select: ['id', 'name', 'email', 'role', 'avatar_url'],
+    });
+    if (!user) throw new NotFoundException('User not found');
     return { user, token };
   }
 
   async becomeVendor(userId: number, userRole: string, dto: BecomeVendorDto) {
     if (userRole === 'admin') throw new ForbiddenException('Admins cannot create vendor profiles');
 
-    const [existing] = await this.db.query('SELECT id FROM vendors WHERE user_id = $1', [userId]);
+    const existing = await this.vendorRepo.findOne({ where: { user_id: userId }, select: ['id'] });
     if (existing) throw new ConflictException('Already a vendor');
 
-    await this.db.query(
-      'INSERT INTO vendors (user_id, business_name, category, city, phone, status) VALUES ($1, $2, $3, $4, $5, \'pending_review\')',
-      [userId, dto.business_name, dto.category || null, dto.city || null, dto.phone || null],
-    );
-    await this.db.query('UPDATE users SET role = \'vendor\' WHERE id = $1', [userId]);
+    await this.vendorRepo.save({
+      user_id: userId,
+      business_name: dto.business_name,
+      category: dto.category || null,
+      city: dto.city || null,
+      phone: dto.phone || null,
+      status: 'pending_review' as any,
+    });
+    await this.userRepo.update(userId, { role: 'vendor' as any });
     return { message: 'Vendor application submitted for review' };
   }
 
   async forgotPassword(email: string) {
-    const [user] = await this.db.query(
-      'SELECT id FROM users WHERE email = $1 AND is_active = true',
-      [email.trim().toLowerCase()],
-    );
-    // Always return success to prevent email enumeration
+    const user = await this.userRepo.findOne({
+      where: { email: email.trim().toLowerCase(), is_active: true },
+      select: ['id'],
+    });
     if (!user) return { message: 'If that email exists, a reset link has been sent' };
 
-    // Invalidate any previous unused tokens
-    await this.db.query(
-      'UPDATE password_resets SET used_at = NOW() WHERE user_id = $1 AND used_at IS NULL',
-      [user.id],
-    );
+    await this.passwordResetRepo.update({ user_id: user.id, used_at: IsNull() as any }, { used_at: new Date() });
 
     const token = crypto.randomBytes(32).toString('hex');
-    const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
-    await this.db.query(
-      'INSERT INTO password_resets (user_id, token, expires_at) VALUES ($1, $2, $3)',
-      [user.id, token, expiresAt],
-    );
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
+    await this.passwordResetRepo.save({ user_id: user.id, token, expires_at: expiresAt });
 
     const appUrl = (this.config.get<string>('appUrl') ?? 'http://localhost:3001').replace(/\/$/, '');
     const resetUrl = `${appUrl}/reset-password?token=${token}`;
-    // TODO: send reset email via nodemailer when SMTP is configured
 
     const isDev = process.env.APP_ENV !== 'production';
     return {
@@ -200,37 +225,35 @@ export class AuthService {
     if (!token || !newPassword || newPassword.length < 6) {
       throw new BadRequestException('Token and new password (min 6 chars) are required');
     }
-    const [reset] = await this.db.query(
-      'SELECT * FROM password_resets WHERE token = $1 AND used_at IS NULL AND expires_at > NOW()',
-      [token],
-    );
+    const reset = await this.passwordResetRepo.findOne({
+      where: { token, used_at: IsNull() as any, expires_at: MoreThan(new Date()) },
+    });
     if (!reset) throw new BadRequestException('Invalid or expired reset token');
 
     const hash = await bcrypt.hash(newPassword, 10);
-    await this.db.transaction(async (manager) => {
-      await manager.query(
-        'UPDATE users SET password_hash = $1, token_invalidated_at = $2 WHERE id = $3',
-        [hash, Date.now(), reset.user_id],
-      );
-      await manager.query('UPDATE password_resets SET used_at = NOW() WHERE id = $1', [reset.id]);
+    await this.dataSource.transaction(async (manager) => {
+      await manager.getRepository(User).update(reset.user_id, {
+        password_hash: hash,
+        token_invalidated_at: Date.now() as any,
+      });
+      await manager.getRepository(PasswordReset).update(reset.id, { used_at: new Date() });
     });
     return { message: 'Password reset successful. Please log in again.' };
   }
 
   async updateProfile(userId: number, dto: { name?: string; phone?: string; city?: string; avatar_url?: string }) {
     const allowed = ['name', 'phone', 'city', 'avatar_url'] as const;
-    const fields: string[] = [];
-    const values: any[] = [];
+    const updateData: Partial<User> = {};
     for (const key of allowed) {
-      if (dto[key] !== undefined) { fields.push(`${key} = $${values.length + 1}`); values.push(dto[key]); }
+      if (dto[key] !== undefined) updateData[key] = dto[key] as any;
     }
-    if (!fields.length) return { updated: false };
-    values.push(userId);
-    await this.db.query(`UPDATE users SET ${fields.join(', ')} WHERE id = $${values.length}`, values);
-    const [user] = await this.db.query(
-      'SELECT id, name, email, phone, city, avatar_url, role FROM users WHERE id = $1',
-      [userId],
-    );
+    if (!Object.keys(updateData).length) return { updated: false };
+    await this.userRepo.update(userId, updateData);
+    const user = await this.userRepo.findOne({
+      where: { id: userId },
+      select: ['id', 'name', 'email', 'phone', 'city', 'avatar_url', 'role'],
+    });
+    if (!user) throw new NotFoundException('User not found');
     return user;
   }
 
@@ -238,7 +261,10 @@ export class AuthService {
     if (!newPassword || newPassword.length < 6) {
       throw new BadRequestException('New password must be at least 6 characters');
     }
-    const [user] = await this.db.query('SELECT id, password_hash FROM users WHERE id = $1', [userId]);
+    const user = await this.userRepo.findOne({
+      where: { id: userId },
+      select: ['id', 'password_hash'],
+    });
     if (!user?.password_hash) {
       throw new BadRequestException('This account uses social login — use forgot-password to set a password');
     }
@@ -246,16 +272,19 @@ export class AuthService {
       throw new UnauthorizedException('Current password is incorrect');
     }
     const hash = await bcrypt.hash(newPassword, 10);
-    await this.db.query(
-      'UPDATE users SET password_hash = $1, token_invalidated_at = $2 WHERE id = $3',
-      [hash, Date.now(), userId],
-    );
+    await this.userRepo.update(userId, {
+      password_hash: hash,
+      token_invalidated_at: Date.now() as any,
+    });
     return { message: 'Password changed successfully. Please log in again.' };
   }
 
   async logout(userId: number, ctx?: { ip: string; ua: string; requestId?: string }) {
-    const [user] = await this.db.query('SELECT email, role FROM users WHERE id = $1', [userId]);
-    await this.db.query('UPDATE users SET token_invalidated_at = $1 WHERE id = $2', [Date.now(), userId]);
+    const user = await this.userRepo.findOne({
+      where: { id: userId },
+      select: ['email', 'role'],
+    });
+    await this.userRepo.update(userId, { token_invalidated_at: Date.now() as any });
     setImmediate(() => this.monitoring.logAuth({
       requestId: ctx?.requestId, userId, email: user?.email, role: user?.role,
       action: 'logout', ipAddress: ctx?.ip ?? '0.0.0.0', userAgent: ctx?.ua,

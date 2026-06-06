@@ -1,51 +1,58 @@
 import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
-import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource } from 'typeorm';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { SupportTicket, TicketStatus } from '../entities/support-ticket.entity';
+import { SupportReply } from '../entities/support-reply.entity';
+import { User } from '../entities/user.entity';
 
 @Injectable()
 export class SupportService {
-  constructor(@InjectDataSource() private readonly db: DataSource) {}
+  constructor(
+    @InjectRepository(SupportTicket) private readonly ticketRepo: Repository<SupportTicket>,
+    @InjectRepository(SupportReply) private readonly replyRepo: Repository<SupportReply>,
+    @InjectRepository(User) private readonly userRepo: Repository<User>,
+  ) {}
 
   async create(userId: number, subject: string, message: string, category = 'general') {
-    const result = await this.db.query(
-      'INSERT INTO support_tickets (user_id, subject, message, category, status) VALUES ($1, $2, $3, $4, \'open\') RETURNING id',
-      [userId, subject, message, category],
-    );
-    return { id: result[0].id, status: 'open' };
+    const ticket = await this.ticketRepo.save({
+      user_id: userId,
+      subject,
+      message,
+      category,
+      status: TicketStatus.OPEN,
+    });
+    return { id: ticket.id, status: 'open' };
   }
 
   async list(userId: number, role: string, status = '') {
     if (role === 'admin') {
-      const where = status ? 'WHERE st.status = $1' : '';
-      return this.db.query(
-        `SELECT st.*, u.name as user_name, u.email
-         FROM support_tickets st JOIN users u ON st.user_id = u.id
-         ${where} ORDER BY st.created_at DESC`,
-        status ? [status] : [],
-      );
+      const qb = this.ticketRepo
+        .createQueryBuilder('st')
+        .innerJoin(User, 'u', 'u.id = st.user_id')
+        .select(['st.*', 'u.name AS user_name', 'u.email AS email'])
+        .orderBy('st.created_at', 'DESC');
+      if (status) qb.where('st.status = :status', { status });
+      return qb.getRawMany();
     }
-    const where = status ? 'AND status = $2' : '';
-    return this.db.query(
-      `SELECT * FROM support_tickets WHERE user_id = $1 ${where} ORDER BY created_at DESC`,
-      status ? [userId, status] : [userId],
-    );
+    const where: any = { user_id: userId };
+    if (status) where.status = status;
+    return this.ticketRepo.find({ where, order: { created_at: 'DESC' } });
   }
 
   async reply(ticketId: number, userId: number, message: string, role: string) {
-    const [ticket] = await this.db.query('SELECT * FROM support_tickets WHERE id = $1', [ticketId]);
+    const ticket = await this.ticketRepo.findOne({ where: { id: ticketId } });
     if (!ticket) throw new NotFoundException('Ticket not found');
     if (role !== 'admin' && ticket.user_id !== userId) throw new ForbiddenException('Access denied');
 
-    await this.db.query(
-      'INSERT INTO support_replies (ticket_id, user_id, message, is_staff) VALUES ($1, $2, $3, $4)',
-      [ticketId, userId, message, role === 'admin' ? 1 : 0],
-    );
+    await this.replyRepo.save({
+      ticket_id: ticketId,
+      user_id: userId,
+      message,
+      is_staff: role === 'admin',
+    });
 
     if (role === 'admin') {
-      await this.db.query(
-        'UPDATE support_tickets SET status = \'answered\' WHERE id = $1',
-        [ticketId],
-      );
+      await this.ticketRepo.update(ticketId, { status: TicketStatus.ANSWERED });
     }
     return { replied: true };
   }

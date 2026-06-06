@@ -1,57 +1,55 @@
 import { Injectable } from '@nestjs/common';
-import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource } from 'typeorm';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import { PushService } from '../services/push.service';
+import { Notification } from '../entities/notification.entity';
+import { UserFcmToken } from '../entities/user-fcm-token.entity';
 
 @Injectable()
 export class NotificationsService {
   constructor(
-    @InjectDataSource() private readonly db: DataSource,
+    @InjectRepository(Notification) private readonly notifRepo: Repository<Notification>,
+    @InjectRepository(UserFcmToken) private readonly userFcmTokenRepo: Repository<UserFcmToken>,
     private readonly push: PushService,
   ) {}
 
   async list(userId: number, limit = 30) {
-    const rows = await this.db.query(
-      `SELECT id, user_id, title, body, type, offer_id, is_read, created_at
-       FROM notifications WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2`,
-      [userId, Math.min(limit, 100)],
-    );
-    const [unreadRow] = await this.db.query(
-      'SELECT COUNT(*) as cnt FROM notifications WHERE user_id = $1 AND is_read = false',
-      [userId],
-    );
+    const notifications = await this.notifRepo.find({
+      where: { user_id: userId },
+      order: { created_at: 'DESC' },
+      take: Math.min(limit, 100),
+    });
+    const unread_count = await this.notifRepo.count({
+      where: { user_id: userId, is_read: false },
+    });
     return {
-      notifications: rows.map((r: any) => ({
+      notifications: notifications.map((r: any) => ({
         ...r,
         id: +r.id,
         user_id: +r.user_id,
         offer_id: r.offer_id === null ? null : +r.offer_id,
         is_read: +r.is_read,
       })),
-      unread_count: +unreadRow.cnt,
+      unread_count,
     };
   }
 
   async markRead(userId: number, notificationId?: number) {
     if (notificationId) {
-      await this.db.query(
-        'UPDATE notifications SET is_read = true WHERE id = $1 AND user_id = $2',
-        [notificationId, userId],
-      );
+      await this.notifRepo.update({ id: notificationId, user_id: userId }, { is_read: true });
     } else {
-      await this.db.query(
-        'UPDATE notifications SET is_read = true WHERE user_id = $1',
-        [userId],
-      );
+      await this.notifRepo.update({ user_id: userId }, { is_read: true });
     }
     return { updated: true };
   }
 
   async saveToken(userId: number, token: string, platform = 'web') {
-    await this.db.query(
-      'INSERT INTO user_fcm_tokens (user_id, token, platform) VALUES ($1,$2,$3) ON CONFLICT (token) DO UPDATE SET user_id=$4, platform=$5',
-      [userId, token, platform, userId, platform],
-    );
+    const existing = await this.userFcmTokenRepo.findOne({ where: { token } });
+    if (existing) {
+      await this.userFcmTokenRepo.update({ token }, { user_id: userId, platform });
+    } else {
+      await this.userFcmTokenRepo.save({ user_id: userId, token, platform });
+    }
     return { saved: true };
   }
 

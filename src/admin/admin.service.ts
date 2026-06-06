@@ -1,62 +1,95 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
 import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { PushService } from '../services/push.service';
 import { MonitoringService } from '../monitoring/monitoring.service';
+import { User, UserRole } from '../entities/user.entity';
+import { Vendor, VendorStatus } from '../entities/vendor.entity';
+import { Offer } from '../entities/offer.entity';
+import { SiteSetting } from '../entities/site-setting.entity';
+import { VendorDailyStat } from '../entities/vendor-daily-stat.entity';
+import { UserInteraction } from '../entities/user-interaction.entity';
+import { VendorApplication } from '../entities/vendor-application.entity';
+import { SubscriptionPlan } from '../entities/subscription-plan.entity';
+import { FraudFlag, FraudFlagStatus } from '../entities/fraud-flag.entity';
+import { Payment } from '../entities/payment.entity';
 
 @Injectable()
 export class AdminService {
   constructor(
-    @InjectDataSource() private readonly db: DataSource,
+    @InjectRepository(User) private readonly userRepo: Repository<User>,
+    @InjectRepository(Vendor) private readonly vendorRepo: Repository<Vendor>,
+    @InjectRepository(Offer) private readonly offerRepo: Repository<Offer>,
+    @InjectRepository(SiteSetting) private readonly siteSettingRepo: Repository<SiteSetting>,
+    @InjectRepository(VendorDailyStat) private readonly dailyStatRepo: Repository<VendorDailyStat>,
+    @InjectRepository(UserInteraction) private readonly interactionRepo: Repository<UserInteraction>,
+    @InjectRepository(VendorApplication) private readonly appRepo: Repository<VendorApplication>,
+    @InjectRepository(SubscriptionPlan) private readonly planRepo: Repository<SubscriptionPlan>,
+    @InjectRepository(FraudFlag) private readonly fraudFlagRepo: Repository<FraudFlag>,
+    @InjectRepository(Payment) private readonly paymentRepo: Repository<Payment>,
+    @InjectDataSource() private readonly dataSource: DataSource,
     private readonly push: PushService,
     private readonly monitoring: MonitoringService,
   ) {}
 
   async getStats() {
-    const [[users], [vendors], [offers], [totalOffers]] = await Promise.all([
-      this.db.query('SELECT COUNT(*) as cnt FROM users'),
-      this.db.query('SELECT COUNT(*) as cnt FROM vendors WHERE status = \'approved\''),
-      this.db.query('SELECT COUNT(*) as cnt FROM offers WHERE is_active = true'),
-      this.db.query('SELECT COUNT(*) as cnt FROM offers'),
+    const now = new Date();
+    const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+    const [
+      totalUsers, approvedVendors, activeOffers, totalOffers,
+      pendingApps, openTickets, fraudFlags,
+      rev, thisMonthUsers, lastMonthUsers, totalInteractions, todayInteractions,
+      roles, dailyUsers, recentUsers, recentVendors,
+    ] = await Promise.all([
+      this.userRepo.count(),
+      this.vendorRepo.count({ where: { status: VendorStatus.APPROVED } }),
+      this.offerRepo.count({ where: { is_active: true } }),
+      this.offerRepo.count(),
+      this.appRepo.count({ where: { status: 'pending' } }),
+      // support_tickets not exposed as repo here — use QB
+      this.dataSource.createQueryBuilder().select('COUNT(*)', 'cnt').from('support_tickets', 's').where("s.status = 'open'").getRawOne(),
+      this.fraudFlagRepo.count({ where: { status: FraudFlagStatus.PENDING } }),
+      this.paymentRepo.createQueryBuilder('p').select('COALESCE(SUM(p.amount),0)', 'total').where("p.status = 'paid'").getRawOne(),
+      this.userRepo.createQueryBuilder('u').where('u.created_at >= :start', { start: thisMonthStart }).getCount(),
+      this.userRepo.createQueryBuilder('u').where('u.created_at >= :start AND u.created_at < :end', { start: lastMonthStart, end: thisMonthStart }).getCount(),
+      this.interactionRepo.count(),
+      this.interactionRepo.createQueryBuilder('ui').where('ui.created_at >= :today', { today }).getCount(),
+      this.userRepo.createQueryBuilder('u').select(['u.role AS role', 'COUNT(*) AS cnt']).groupBy('u.role').getRawMany(),
+      this.userRepo.createQueryBuilder('u').select(['u.created_at::date AS d', 'COUNT(*) AS cnt']).where('u.created_at >= :since', { since: new Date(Date.now() - 7 * 86400000) }).groupBy('u.created_at::date').orderBy('d', 'ASC').getRawMany(),
+      this.userRepo.find({ select: ['id', 'name', 'email', 'role', 'created_at'], order: { created_at: 'DESC' }, take: 5 }),
+      this.vendorRepo.createQueryBuilder('v').innerJoin(User, 'u', 'u.id = v.user_id').select(['v.id AS id', 'v.business_name AS business_name', 'v.status AS status', 'v.subscription_plan AS subscription_plan', 'v.created_at AS created_at', 'u.email AS email']).orderBy('v.created_at', 'DESC').limit(5).getRawMany(),
     ]);
 
-    const [[pendingVendors], [openTickets], [pendingBanners], [pendingSpotlights], [fraudFlags]] = await Promise.all([
-      this.db.query('SELECT COUNT(*) as cnt FROM vendor_applications WHERE status = \'pending\''),
-      this.db.query('SELECT COUNT(*) as cnt FROM support_tickets WHERE status = \'open\''),
-      this.db.query('SELECT COUNT(*) as cnt FROM banner_ad_requests WHERE status = \'pending\''),
-      this.db.query('SELECT COUNT(*) as cnt FROM spotlight_requests WHERE status = \'pending\''),
-      this.db.query('SELECT COUNT(*) as cnt FROM fraud_flags WHERE status = \'pending\''),
+    // banner_ad_requests and spotlight_requests don't have entity files; use QB
+    const [pendingBanners, pendingSpotlights] = await Promise.all([
+      this.dataSource.createQueryBuilder().select('COUNT(*)', 'cnt').from('banner_ad_requests', 'b').where("b.status = 'pending'").getRawOne(),
+      this.dataSource.createQueryBuilder().select('COUNT(*)', 'cnt').from('spotlight_requests', 'sr').where("sr.status = 'pending'").getRawOne(),
     ]);
 
-    const [[rev]] = [await this.db.query('SELECT COALESCE(SUM(amount),0) as total FROM payments WHERE status = \'paid\'')];
-    const [[usersThisMonth], [usersLastMonth]] = await Promise.all([
-      this.db.query('SELECT COUNT(*) as cnt FROM users WHERE EXTRACT(MONTH FROM created_at)=EXTRACT(MONTH FROM NOW()) AND EXTRACT(YEAR FROM created_at)=EXTRACT(YEAR FROM NOW())'),
-      this.db.query('SELECT COUNT(*) as cnt FROM users WHERE EXTRACT(MONTH FROM created_at)=EXTRACT(MONTH FROM NOW() - INTERVAL \'1 month\') AND EXTRACT(YEAR FROM created_at)=EXTRACT(YEAR FROM NOW() - INTERVAL \'1 month\')'),
-    ]);
-    const [[interactions], [interactionsToday]] = await Promise.all([
-      this.db.query('SELECT COUNT(*) as cnt FROM user_interactions'),
-      this.db.query('SELECT COUNT(*) as cnt FROM user_interactions WHERE created_at::date = CURRENT_DATE'),
-    ]);
-
-    const roles = await this.db.query('SELECT role, COUNT(*) as cnt FROM users GROUP BY role');
     const roleBreakdown: Record<string, number> = { user: 0, vendor: 0, admin: 0 };
     for (const r of roles) roleBreakdown[r.role] = +r.cnt;
 
-    const tm = +usersThisMonth.cnt, lm = +usersLastMonth.cnt;
+    const tm = thisMonthUsers, lm = lastMonthUsers;
     let growth = 0;
     if (lm > 0) growth = Math.round(((tm - lm) / lm) * 1000) / 10;
     else if (tm > 0) growth = 100;
 
-    const [dailyUsers, recentUsers, recentVendors] = await Promise.all([
-      this.db.query('SELECT created_at::date AS d, COUNT(*) AS cnt FROM users WHERE created_at >= NOW() - INTERVAL \'7 days\' GROUP BY created_at::date ORDER BY d ASC'),
-      this.db.query('SELECT id, name, email, role, created_at FROM users ORDER BY created_at DESC LIMIT 5'),
-      this.db.query('SELECT v.id, v.business_name, v.status, v.subscription_plan, v.created_at, u.email FROM vendors v JOIN users u ON v.user_id = u.id ORDER BY v.created_at DESC LIMIT 5'),
-    ]);
-
     return {
-      totals: { users: +users.cnt, vendors: +vendors.cnt, offers: +offers.cnt, total_offers: +totalOffers.cnt, interactions: +interactions.cnt, revenue: Math.round(+rev.total * 100) / 100 },
-      pending: { vendors: +pendingVendors.cnt, tickets: +openTickets.cnt, banners: +pendingBanners.cnt, spotlights: +pendingSpotlights.cnt, fraud: +fraudFlags.cnt },
-      users: { this_month: tm, last_month: lm, growth_pct: growth, today_active: +interactionsToday.cnt, role_breakdown: roleBreakdown },
+      totals: {
+        users: totalUsers, vendors: approvedVendors, offers: activeOffers,
+        total_offers: totalOffers, interactions: totalInteractions,
+        revenue: Math.round(+rev?.total * 100) / 100,
+      },
+      pending: {
+        vendors: pendingApps, tickets: +openTickets?.cnt || 0,
+        banners: +pendingBanners?.cnt || 0, spotlights: +pendingSpotlights?.cnt || 0,
+        fraud: fraudFlags,
+      },
+      users: { this_month: tm, last_month: lm, growth_pct: growth, today_active: todayInteractions, role_breakdown: roleBreakdown },
       daily_signups: dailyUsers,
       recent_users: recentUsers,
       recent_vendors: recentVendors,
@@ -65,79 +98,86 @@ export class AdminService {
 
   async getUsers(page = 1, search = '', role = '', status = '', limit = 30) {
     const offset = (page - 1) * limit;
-    const conds: string[] = [];
-    const p: any[] = [];
-    if (search) { p.push(`%${search}%`, `%${search}%`, `%${search}%`); conds.push(`(u.name LIKE $${p.length - 2} OR u.email LIKE $${p.length - 1} OR u.city LIKE $${p.length})`); }
-    if (role)   { p.push(role); conds.push(`u.role = $${p.length}`); }
-    if (status === 'active') conds.push('u.is_active = true');
-    else if (status === 'banned') conds.push('u.is_active = false');
-    const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
-    const [{ total }] = await this.db.query(`SELECT COUNT(*) as total FROM users u ${where}`, p);
-    p.push(limit, offset);
-    const users = await this.db.query(
-      `SELECT u.id, u.name, u.email, u.role, u.city, u.is_active, u.created_at,
-              COALESCE((SELECT COUNT(*) FROM user_interactions WHERE user_id=u.id),0) as interactions,
-              0 as login_count, 0 as follows
-       FROM users u ${where} ORDER BY u.created_at DESC LIMIT $${p.length - 1} OFFSET $${p.length}`,
-      p,
-    );
-    return { users, total: +total };
+    const qb = this.userRepo.createQueryBuilder('u');
+    if (search) qb.andWhere('(u.name LIKE :s OR u.email LIKE :s OR u.city LIKE :s)', { s: `%${search}%` });
+    if (role) qb.andWhere('u.role = :role', { role });
+    if (status === 'active') qb.andWhere('u.is_active = true');
+    else if (status === 'banned') qb.andWhere('u.is_active = false');
+
+    const total = await qb.getCount();
+    const users = await qb
+      .select([
+        'u.id AS id', 'u.name AS name', 'u.email AS email', 'u.role AS role',
+        'u.city AS city', 'u.is_active AS is_active', 'u.created_at AS created_at',
+        'COALESCE((SELECT COUNT(*) FROM user_interactions WHERE user_id=u.id),0) AS interactions',
+        '0 AS login_count', '0 AS follows',
+      ])
+      .orderBy('u.created_at', 'DESC')
+      .limit(limit)
+      .offset(offset)
+      .getRawMany();
+    return { users, total };
   }
 
   async getVendors(search = '', status = '', plan = '', limit = 30, offset = 0) {
-    const conds: string[] = [];
-    const p: any[] = [];
-    if (status) { p.push(status); conds.push(`v.status = $${p.length}`); }
-    if (plan)   { p.push(plan); conds.push(`v.subscription_plan = $${p.length}`); }
-    if (search) { p.push(`%${search}%`, `%${search}%`, `%${search}%`); conds.push(`(v.business_name LIKE $${p.length - 2} OR u.email LIKE $${p.length - 1} OR v.city LIKE $${p.length})`); }
-    const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
-    const [{ total }] = await this.db.query(`SELECT COUNT(*) as total FROM vendors v JOIN users u ON v.user_id = u.id ${where}`, p);
-    p.push(limit, offset);
-    const vendors = await this.db.query(
-      `SELECT v.*, u.name as owner_name, u.email as owner_email, u.is_active as user_active,
-              COUNT(DISTINCT o.id) as total_offers,
-              COUNT(DISTINCT CASE WHEN o.is_active = true THEN o.id END) as active_offers,
-              COALESCE(SUM(o.views), 0) as total_views,
-              COALESCE(SUM(o.clicks), 0) as total_clicks,
-              COUNT(DISTINCT vf.user_id) as total_followers
-       FROM vendors v
-       JOIN users u ON v.user_id = u.id
-       LEFT JOIN offers o ON o.vendor_id = v.id
-       LEFT JOIN vendor_followers vf ON vf.vendor_id = v.id
-       ${where}
-       GROUP BY v.id, u.name, u.email, u.is_active
-       ORDER BY v.created_at DESC LIMIT $${p.length - 1} OFFSET $${p.length}`,
-      p,
-    );
-    return { vendors, total: +total };
+    const qb = this.vendorRepo
+      .createQueryBuilder('v')
+      .innerJoin(User, 'u', 'u.id = v.user_id');
+    if (status) qb.andWhere('v.status = :status', { status });
+    if (plan) qb.andWhere('v.subscription_plan = :plan', { plan });
+    if (search) qb.andWhere('(v.business_name LIKE :s OR u.email LIKE :s OR v.city LIKE :s)', { s: `%${search}%` });
+
+    const total = await qb.getCount();
+    const vendors = await qb
+      .select([
+        'v.*', 'u.name AS owner_name', 'u.email AS owner_email', 'u.is_active AS user_active',
+        'COUNT(DISTINCT o.id) AS total_offers',
+        'COUNT(DISTINCT CASE WHEN o.is_active = true THEN o.id END) AS active_offers',
+        'COALESCE(SUM(o.views), 0) AS total_views',
+        'COALESCE(SUM(o.clicks), 0) AS total_clicks',
+        'COUNT(DISTINCT vf.user_id) AS total_followers',
+      ])
+      .leftJoin(Offer, 'o', 'o.vendor_id = v.id')
+      .leftJoin('vendor_followers', 'vf', 'vf.vendor_id = v.id')
+      .groupBy('v.id, u.name, u.email, u.is_active')
+      .orderBy('v.created_at', 'DESC')
+      .limit(limit)
+      .offset(offset)
+      .getRawMany();
+    return { vendors, total };
   }
 
   async reviewVendor(appId: number, status: string, note: string) {
     const allowed = ['approved', 'rejected'];
     if (!allowed.includes(status)) throw new BadRequestException('Invalid status');
 
-    // Load the application
-    const [app] = await this.db.query('SELECT * FROM vendor_applications WHERE id = $1', [appId]);
+    const app = await this.appRepo.findOne({ where: { id: appId } });
     if (!app) throw new NotFoundException('Application not found');
 
-    await this.db.transaction(async (manager) => {
-      await manager.query('UPDATE vendor_applications SET status = $1 WHERE id = $2', [status, appId]);
+    await this.dataSource.transaction(async (manager) => {
+      await manager.getRepository(VendorApplication).update(appId, { status });
 
       if (status === 'approved') {
-        const [existing] = await manager.query('SELECT id FROM vendors WHERE user_id = $1', [app.user_id]);
+        const existing = await manager.getRepository(Vendor).findOne({ where: { user_id: app.user_id }, select: ['id'] });
         if (existing) {
-          await manager.query(
-            'UPDATE vendors SET status = \'approved\', review_note = $1, business_name = $2, category = $3, city = $4, address = $5, phone = $6, website = $7, gst_number = $8, description = $9 WHERE user_id = $10',
-            [note || null, app.business_name, app.category, app.city, app.address, app.phone, app.website, app.gst_number, app.description, app.user_id],
+          await manager.getRepository(Vendor).update(
+            { user_id: app.user_id },
+            {
+              status: VendorStatus.APPROVED, review_note: note || null,
+              business_name: app.business_name, category: app.category,
+              city: app.city, address: app.address, phone: app.phone,
+              website: app.website, gst_number: app.gst_number, description: app.description,
+            },
           );
         } else {
-          await manager.query(
-            `INSERT INTO vendors (user_id, business_name, category, city, address, phone, website, gst_number, description, status, review_note, subscription_plan)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'approved', $10, 'free')`,
-            [app.user_id, app.business_name, app.category, app.city, app.address, app.phone, app.website, app.gst_number, app.description, note || null],
-          );
+          await manager.getRepository(Vendor).save({
+            user_id: app.user_id, business_name: app.business_name, category: app.category,
+            city: app.city, address: app.address, phone: app.phone, website: app.website,
+            gst_number: app.gst_number, description: app.description,
+            status: VendorStatus.APPROVED, review_note: note || null, subscription_plan: 'free',
+          });
         }
-        await manager.query('UPDATE users SET role = \'vendor\' WHERE id = $1', [app.user_id]);
+        await manager.getRepository(User).update(app.user_id, { role: UserRole.VENDOR });
       }
     });
 
@@ -149,72 +189,64 @@ export class AdminService {
   }
 
   async getAdminOffers(search = '', category = '', status = '', limit = 30, offset = 0) {
-    const conds: string[] = [];
-    const p: any[] = [];
-    if (status === 'active')   conds.push('o.is_active = true');
-    else if (status === 'inactive') conds.push('o.is_active = false');
-    else if (status === 'expired')  conds.push('o.valid_until < NOW()');
-    if (category) { p.push(category); conds.push(`o.category = $${p.length}`); }
-    if (search)   { p.push(`%${search}%`, `%${search}%`); conds.push(`(o.title LIKE $${p.length - 1} OR v.business_name LIKE $${p.length})`); }
-    const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
-    const [{ total }] = await this.db.query(`SELECT COUNT(*) as total FROM offers o JOIN vendors v ON o.vendor_id=v.id JOIN users u ON v.user_id=u.id ${where}`, p);
-    p.push(limit, offset);
-    const offers = await this.db.query(
-      `SELECT o.*, v.business_name, u.email as vendor_email
-       FROM offers o
-       JOIN vendors v ON o.vendor_id = v.id
-       JOIN users u ON v.user_id = u.id
-       ${where}
-       ORDER BY o.created_at DESC LIMIT $${p.length - 1} OFFSET $${p.length}`,
-      p,
-    );
-    return { offers, total: +total };
+    const qb = this.offerRepo
+      .createQueryBuilder('o')
+      .innerJoin(Vendor, 'v', 'v.id = o.vendor_id')
+      .innerJoin(User, 'u', 'u.id = v.user_id');
+    if (status === 'active') qb.andWhere('o.is_active = true');
+    else if (status === 'inactive') qb.andWhere('o.is_active = false');
+    else if (status === 'expired') qb.andWhere('o.valid_until < NOW()');
+    if (category) qb.andWhere('o.category = :category', { category });
+    if (search) qb.andWhere('(o.title LIKE :s OR v.business_name LIKE :s)', { s: `%${search}%` });
+
+    const total = await qb.getCount();
+    const offers = await qb
+      .select(['o.*', 'v.business_name AS business_name', 'u.email AS vendor_email'])
+      .orderBy('o.created_at', 'DESC')
+      .limit(limit)
+      .offset(offset)
+      .getRawMany();
+    return { offers, total };
   }
 
   async broadcast(title: string, body: string, data: Record<string, string> = {}) {
-    const userIds = await this.db.query('SELECT id FROM users WHERE is_active = true');
-    const ids = userIds.map((u: any) => u.id);
+    const users = await this.userRepo.find({ where: { is_active: true }, select: ['id'] });
+    const ids = users.map(u => u.id);
     const sent = await this.push.send(ids, title, body, data);
     return { sent, total: ids.length };
   }
 
   async getSiteSettings() {
-    const rows = await this.db.query('SELECT * FROM site_settings');
+    const rows = await this.siteSettingRepo.find();
     const settings: Record<string, any> = {};
     for (const r of rows) settings[r.key] = r.value;
     return settings;
   }
 
   async updateSiteSettings(dto: Record<string, any>) {
-    for (const [key, value] of Object.entries(dto)) {
-      await this.db.query(
-        'INSERT INTO site_settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = $3',
-        [key, String(value), String(value)],
-      );
-    }
+    const entries = Object.entries(dto).map(([key, value]) => ({ key, value: String(value) }));
+    await this.siteSettingRepo.upsert(entries, ['key']);
     return { updated: true };
   }
 
   async getVendorRequests() {
-    return this.db.query(
-      `SELECT va.*,
-              u.name  AS user_name,
-              u.email AS user_email
-       FROM vendor_applications va
-       JOIN users u ON va.user_id = u.id
-       ORDER BY va.created_at DESC`,
-    );
+    return this.appRepo
+      .createQueryBuilder('va')
+      .innerJoin(User, 'u', 'u.id = va.user_id')
+      .select(['va.*', 'u.name AS user_name', 'u.email AS user_email'])
+      .orderBy('va.created_at', 'DESC')
+      .getRawMany();
   }
 
   async updateUser(userId: number, action: string, extra: Record<string, any> = {}, adminId?: number) {
     switch (action) {
-      case 'ban':    await this.db.query('UPDATE users SET is_active = false WHERE id = $1', [userId]); break;
-      case 'unban':  await this.db.query('UPDATE users SET is_active = true WHERE id = $1', [userId]); break;
-      case 'delete': await this.db.query('DELETE FROM users WHERE id = $1', [userId]); break;
+      case 'ban':    await this.userRepo.update(userId, { is_active: false }); break;
+      case 'unban':  await this.userRepo.update(userId, { is_active: true }); break;
+      case 'delete': await this.userRepo.update(userId, { is_active: false }); break;
       case 'update_role': {
         const allowedRoles = ['user', 'vendor', 'admin'];
         if (!allowedRoles.includes(extra.role)) throw new BadRequestException('Invalid role');
-        await this.db.query('UPDATE users SET role = $1 WHERE id = $2', [extra.role, userId]);
+        await this.userRepo.update(userId, { role: extra.role as UserRole });
         break;
       }
       default: throw new BadRequestException('Unknown action');
@@ -232,11 +264,11 @@ export class AdminService {
 
   async updateOffer(offerId: number, action: string, extra: Record<string, any> = {}) {
     switch (action) {
-      case 'activate':   await this.db.query('UPDATE offers SET is_active = true WHERE id = $1', [offerId]); break;
-      case 'deactivate': await this.db.query('UPDATE offers SET is_active = false WHERE id = $1', [offerId]); break;
-      case 'delete':     await this.db.query('DELETE FROM offers WHERE id = $1', [offerId]); break;
+      case 'activate':   await this.offerRepo.update(offerId, { is_active: true }); break;
+      case 'deactivate': await this.offerRepo.update(offerId, { is_active: false }); break;
+      case 'delete':     await this.offerRepo.update(offerId, { is_active: false }); break;
       case 'feature':
-        await this.db.query('UPDATE offers SET is_featured = $1 WHERE id = $2', [extra.featured ?? 1, offerId]);
+        await this.offerRepo.update(offerId, { is_featured: Boolean(extra.featured ?? 1) });
         break;
       default: throw new BadRequestException('Unknown action');
     }
@@ -245,15 +277,16 @@ export class AdminService {
 
   async updateVendor(vendorId: number, action: string, extra: Record<string, any> = {}, adminId?: number) {
     switch (action) {
-      case 'approve':  await this.db.query('UPDATE vendors SET status = \'approved\' WHERE id = $1', [vendorId]); break;
-      case 'reject':   await this.db.query('UPDATE vendors SET status = \'rejected\' WHERE id = $1', [vendorId]); break;
-      case 'suspend':  await this.db.query('UPDATE vendors SET status = \'suspended\' WHERE id = $1', [vendorId]); break;
+      case 'approve':  await this.vendorRepo.update(vendorId, { status: VendorStatus.APPROVED }); break;
+      case 'reject':   await this.vendorRepo.update(vendorId, { status: VendorStatus.REJECTED }); break;
+      case 'suspend':  await this.vendorRepo.update(vendorId, { status: VendorStatus.SUSPENDED }); break;
       case 'update_plan': {
         if (!extra.plan) throw new BadRequestException('Plan is required');
-        // Check DB first; also allow 'free' which is the default and may not have a table row
-        const [dbPlan] = await this.db.query('SELECT slug FROM subscription_plans WHERE slug = $1', [extra.plan]);
+        const dbPlan = extra.plan !== 'free'
+          ? await this.planRepo.findOne({ where: { slug: extra.plan }, select: ['slug'] })
+          : null;
         if (!dbPlan && extra.plan !== 'free') throw new BadRequestException('Invalid plan');
-        await this.db.query('UPDATE vendors SET subscription_plan = $1 WHERE id = $2', [extra.plan, vendorId]);
+        await this.vendorRepo.update(vendorId, { subscription_plan: extra.plan });
         break;
       }
       default: throw new BadRequestException('Unknown vendor action');
@@ -270,34 +303,33 @@ export class AdminService {
   }
 
   async syncDailyStats(targetDate?: string) {
-    // Default to yesterday so today's partial data is not committed
     const date = targetDate ?? new Date(Date.now() - 86400000).toISOString().slice(0, 10);
 
-    await this.db.query(
-      `INSERT INTO vendor_daily_stats (vendor_id, stat_date, impressions, clicks, saves, redemptions)
-       SELECT
-         o.vendor_id,
-         $1 AS stat_date,
-         COALESCE(SUM(CASE WHEN ui.action = 'view'   THEN 1 ELSE 0 END), 0) AS impressions,
-         COALESCE(SUM(CASE WHEN ui.action = 'click'  THEN 1 ELSE 0 END), 0) AS clicks,
-         COALESCE(SUM(CASE WHEN ui.action = 'save'   THEN 1 ELSE 0 END), 0) AS saves,
-         COALESCE(SUM(CASE WHEN ui.action = 'redeem' THEN 1 ELSE 0 END), 0) AS redemptions
-       FROM user_interactions ui
-       JOIN offers o ON ui.offer_id = o.id
-       WHERE ui.created_at::date = $2
-       GROUP BY o.vendor_id
-       ON CONFLICT (vendor_id, stat_date) DO UPDATE SET
-         impressions  = EXCLUDED.impressions,
-         clicks       = EXCLUDED.clicks,
-         saves        = EXCLUDED.saves,
-         redemptions  = EXCLUDED.redemptions`,
-      [date, date],
-    );
+    await this.dataSource
+      .createQueryBuilder()
+      .insert()
+      .into(VendorDailyStat)
+      .values(
+        this.dataSource
+          .createQueryBuilder()
+          .select([
+            'o.vendor_id AS vendor_id',
+            ':date AS stat_date',
+            "COALESCE(SUM(CASE WHEN ui.action = 'view'   THEN 1 ELSE 0 END), 0) AS impressions",
+            "COALESCE(SUM(CASE WHEN ui.action = 'click'  THEN 1 ELSE 0 END), 0) AS clicks",
+            "COALESCE(SUM(CASE WHEN ui.action = 'save'   THEN 1 ELSE 0 END), 0) AS saves",
+            "COALESCE(SUM(CASE WHEN ui.action = 'redeem' THEN 1 ELSE 0 END), 0) AS redemptions",
+          ])
+          .from(UserInteraction, 'ui')
+          .innerJoin(Offer, 'o', 'o.id = ui.offer_id')
+          .where('ui.created_at::date = :date', { date })
+          .groupBy('o.vendor_id') as any,
+      )
+      .orUpdate(['impressions', 'clicks', 'saves', 'redemptions'], ['vendor_id', 'stat_date'])
+      .setParameter('date', date)
+      .execute();
 
-    const [{ affected }] = await this.db.query(
-      'SELECT COUNT(*) as affected FROM vendor_daily_stats WHERE stat_date = $1',
-      [date],
-    );
-    return { synced: true, date, vendor_rows: +affected };
+    const affected = await this.dailyStatRepo.count({ where: { stat_date: date as any } });
+    return { synced: true, date, vendor_rows: affected };
   }
 }

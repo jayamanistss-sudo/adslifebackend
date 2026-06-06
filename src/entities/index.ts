@@ -21,6 +21,13 @@ export { AbTest, AbTestStatus } from './ab-test.entity';
 export { ActivityLog } from './activity-log.entity';
 export { AuthLog, AuthAction } from './auth-log.entity';
 export { FraudFlag, FraudEntityType, FraudFlagStatus } from './fraud-flag.entity';
+export { SubscriptionPlan } from './subscription-plan.entity';
+export { VendorApplication } from './vendor-application.entity';
+export { ApiLog } from './api-log.entity';
+export { ErrorLog } from './error-log.entity';
+export { SecurityEvent } from './security-event.entity';
+export { AlertLog } from './alert-log.entity';
+export { BlockedIp } from './blocked-ip.entity';
 
 import { User } from './user.entity';
 import { Vendor } from './vendor.entity';
@@ -45,6 +52,13 @@ import { AbTest } from './ab-test.entity';
 import { ActivityLog } from './activity-log.entity';
 import { AuthLog } from './auth-log.entity';
 import { FraudFlag } from './fraud-flag.entity';
+import { SubscriptionPlan } from './subscription-plan.entity';
+import { VendorApplication } from './vendor-application.entity';
+import { ApiLog } from './api-log.entity';
+import { ErrorLog } from './error-log.entity';
+import { SecurityEvent } from './security-event.entity';
+import { AlertLog } from './alert-log.entity';
+import { BlockedIp } from './blocked-ip.entity';
 
 export const entities = [
   User,
@@ -70,4 +84,11 @@ export const entities = [
   ActivityLog,
   AuthLog,
   FraudFlag,
+  SubscriptionPlan,
+  VendorApplication,
+  ApiLog,
+  ErrorLog,
+  SecurityEvent,
+  AlertLog,
+  BlockedIp,
 ];

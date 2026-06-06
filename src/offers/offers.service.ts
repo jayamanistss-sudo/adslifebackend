@@ -4,22 +4,27 @@ import {
   ForbiddenException,
   BadRequestException,
 } from '@nestjs/common';
-import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource } from 'typeorm';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import { CreateOfferDto, UpdateOfferDto } from './dto/create-offer.dto';
 import { PushService } from '../services/push.service';
 import { NotificationsGateway } from '../gateway/notifications.gateway';
+import { Offer } from '../entities/offer.entity';
+import { Vendor } from '../entities/vendor.entity';
+import { VendorFollower } from '../entities/vendor-follower.entity';
 
 @Injectable()
 export class OffersService {
   constructor(
-    @InjectDataSource() private readonly db: DataSource,
+    @InjectRepository(Offer) private readonly offerRepo: Repository<Offer>,
+    @InjectRepository(Vendor) private readonly vendorRepo: Repository<Vendor>,
+    @InjectRepository(VendorFollower) private readonly vendorFollowerRepo: Repository<VendorFollower>,
     private readonly push: PushService,
     private readonly gateway: NotificationsGateway,
   ) {}
 
   private async getVendorId(userId: number): Promise<number> {
-    const [vendor] = await this.db.query('SELECT id FROM vendors WHERE user_id = $1', [userId]);
+    const vendor = await this.vendorRepo.findOne({ where: { user_id: userId }, select: ['id'] });
     if (!vendor) throw new NotFoundException('Vendor profile not found');
     return vendor.id;
   }
@@ -28,40 +33,37 @@ export class OffersService {
     const vendorId = await this.getVendorId(userId);
     if (!dto.title?.trim()) throw new BadRequestException('Title is required');
 
-    const validFrom = dto.valid_from ? dto.valid_from + ' 00:00:00' : null;
-    const validUntil = dto.valid_until ? dto.valid_until + ' 23:59:59' : null;
+    const validFrom = dto.valid_from ? new Date(dto.valid_from + 'T00:00:00') : null;
+    const validUntil = dto.valid_until ? new Date(dto.valid_until + 'T23:59:59') : null;
 
-    const result = await this.db.query(
-      `INSERT INTO offers (vendor_id, title, description, category, discount_percent,
-        original_price, offer_price, image_url, coupon_code, redeem_url, max_redemptions,
-        valid_from, valid_until, is_active)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 1)
-       RETURNING id`,
-      [
-        vendorId, dto.title.trim(), dto.description?.trim() || null,
-        dto.category?.trim() || 'general', dto.discount_percent ?? null,
-        dto.original_price ?? null, dto.offer_price ?? null,
-        dto.image_url?.trim() || null, dto.coupon_code?.trim() || null,
-        dto.redeem_url?.trim() || null, dto.max_redemptions ?? 0,
-        validFrom, validUntil,
-      ],
-    );
-    const offerId = result[0].id;
+    const saved = await this.offerRepo.save({
+      vendor_id: vendorId,
+      title: dto.title.trim(),
+      description: dto.description?.trim() || null,
+      category: dto.category?.trim() || 'general',
+      discount_percent: dto.discount_percent ?? null,
+      original_price: dto.original_price ?? null,
+      offer_price: dto.offer_price ?? null,
+      image_url: dto.image_url?.trim() || null,
+      coupon_code: dto.coupon_code?.trim() || null,
+      redeem_url: dto.redeem_url?.trim() || null,
+      max_redemptions: dto.max_redemptions ?? 0,
+      valid_from: validFrom,
+      valid_until: validUntil,
+      is_active: true,
+    });
+    const offerId = saved.id;
 
-    // Notify all subscribers of this vendor (fire-and-forget)
     this.notifySubscribers(vendorId, offerId, dto.title.trim(), dto.discount_percent).catch(() => {});
 
     return { id: offerId };
   }
 
   private async notifySubscribers(vendorId: number, offerId: number, title: string, discountPercent?: number) {
-    const [vendor] = await this.db.query('SELECT business_name FROM vendors WHERE id = $1', [vendorId]);
+    const vendor = await this.vendorRepo.findOne({ where: { id: vendorId }, select: ['business_name'] });
     if (!vendor) return;
 
-    const followers = await this.db.query(
-      'SELECT user_id FROM vendor_followers WHERE vendor_id = $1',
-      [vendorId],
-    );
+    const followers = await this.vendorFollowerRepo.find({ where: { vendor_id: vendorId } });
     if (!followers.length) return;
 
     const userIds: number[] = followers.map((f: any) => f.user_id);
@@ -77,10 +79,8 @@ export class OffersService {
       created_at: new Date().toISOString(),
     };
 
-    // Real-time via WebSocket (instant, for users currently in the app)
     this.gateway.sendToUsers(userIds, 'notification', payload);
 
-    // Push notification via FCM (for users not currently in the app)
     await this.push.send(userIds, notifTitle, notifBody, {
       type:      'new_offer',
       offer_id:  String(offerId),
@@ -89,7 +89,7 @@ export class OffersService {
   }
 
   async update(userId: number, offerId: number, dto: UpdateOfferDto, role: string) {
-    const [offer] = await this.db.query('SELECT vendor_id FROM offers WHERE id = $1', [offerId]);
+    const offer = await this.offerRepo.findOne({ where: { id: offerId } });
     if (!offer) throw new NotFoundException('Offer not found');
 
     if (role !== 'admin') {
@@ -97,42 +97,30 @@ export class OffersService {
       if (offer.vendor_id !== vendorId) throw new ForbiddenException('Access denied');
     }
 
-    const fields: string[] = [];
-    const values: any[] = [];
-
-    // Treat empty strings the same as null so editing never wipes existing data
     const trimOrNull = (v: string | undefined) => (v?.trim() || null);
-    const map: Record<string, any> = {
-      title:            dto.title?.trim() || undefined,
-      description:      trimOrNull(dto.description),
-      category:         dto.category?.trim() || undefined,
-      image_url:        trimOrNull(dto.image_url),
-      coupon_code:      trimOrNull(dto.coupon_code),
-      redeem_url:       trimOrNull(dto.redeem_url),
-      discount_percent: dto.discount_percent ?? undefined,
-      original_price:   dto.original_price   ?? undefined,
-      offer_price:      dto.offer_price       ?? undefined,
-      max_redemptions:  dto.max_redemptions   ?? undefined,
-      is_active: dto.is_active === undefined ? undefined : Number(dto.is_active),
-      valid_from:  dto.valid_from  ? dto.valid_from  + ' 00:00:00' : undefined,
-      valid_until: dto.valid_until ? dto.valid_until + ' 23:59:59' : undefined,
-    };
+    const updateData: Partial<Offer> = {};
 
-    for (const [key, val] of Object.entries(map)) {
-      if (val !== undefined) {
-        fields.push(`${key} = $${values.length + 1}`);
-        values.push(val);
-      }
-    }
+    if (dto.title?.trim())                           updateData.title = dto.title.trim();
+    if (dto.description !== undefined)               updateData.description = trimOrNull(dto.description);
+    if (dto.category?.trim())                        updateData.category = dto.category.trim();
+    if (dto.image_url !== undefined)                 updateData.image_url = trimOrNull(dto.image_url);
+    if (dto.coupon_code !== undefined)               updateData.coupon_code = trimOrNull(dto.coupon_code);
+    if (dto.redeem_url !== undefined)                updateData.redeem_url = trimOrNull(dto.redeem_url);
+    if (dto.discount_percent !== undefined)          updateData.discount_percent = dto.discount_percent;
+    if (dto.original_price !== undefined)            updateData.original_price = dto.original_price;
+    if (dto.offer_price !== undefined)               updateData.offer_price = dto.offer_price;
+    if (dto.max_redemptions !== undefined)           updateData.max_redemptions = dto.max_redemptions;
+    if (dto.is_active !== undefined)                 updateData.is_active = Boolean(dto.is_active);
+    if (dto.valid_from)                              updateData.valid_from = new Date(dto.valid_from + 'T00:00:00');
+    if (dto.valid_until)                             updateData.valid_until = new Date(dto.valid_until + 'T23:59:59');
 
-    if (fields.length === 0) throw new BadRequestException('No fields to update');
-    values.push(offerId);
-    await this.db.query(`UPDATE offers SET ${fields.join(', ')} WHERE id = $${values.length}`, values);
+    if (Object.keys(updateData).length === 0) throw new BadRequestException('No fields to update');
+    await this.offerRepo.update(offerId, updateData);
     return { updated: true };
   }
 
   async delete(userId: number, offerId: number, role: string) {
-    const [offer] = await this.db.query('SELECT vendor_id FROM offers WHERE id = $1', [offerId]);
+    const offer = await this.offerRepo.findOne({ where: { id: offerId } });
     if (!offer) throw new NotFoundException('Offer not found');
 
     if (role !== 'admin') {
@@ -140,50 +128,50 @@ export class OffersService {
       if (offer.vendor_id !== vendorId) throw new ForbiddenException('Access denied');
     }
 
-    await this.db.query('DELETE FROM offers WHERE id = $1', [offerId]);
+    await this.offerRepo.delete({ id: offerId });
     return { deleted: true };
   }
 
   async detail(offerId: number) {
-    const [offer] = await this.db.query(
-      `SELECT
-         o.id,
-         o.vendor_id          AS vendorId,
-         o.title,
-         o.description,
-         o.category,
-         o.discount_percent   AS discountPercent,
-         o.original_price     AS originalPrice,
-         o.offer_price        AS offerPrice,
-         o.image_url          AS imageUrl,
-         o.coupon_code        AS couponCode,
-         o.redeem_url         AS redeemUrl,
-         o.max_redemptions    AS maxRedemptions,
-         o.current_redemptions AS currentRedemptions,
-         o.valid_from         AS validFrom,
-         o.valid_until        AS validUntil,
-         o.is_active          AS isActive,
-         o.is_featured        AS isFeatured,
-         o.views,
-         o.clicks,
-         o.saves,
-         v.business_name      AS businessName,
-         v.logo_url           AS vendorLogo,
-         v.city               AS vendorCity,
-         v.address            AS vendorAddress,
-         v.phone              AS vendorPhone,
-         v.website            AS vendorWebsite,
-         v.lat                AS vendorLat,
-         v.lng                AS vendorLng,
-         v.category           AS vendorCategory,
-         v.description        AS vendorDescription
-       FROM offers o
-       JOIN vendors v ON o.vendor_id = v.id
-       WHERE o.id = $1`,
-      [offerId],
-    );
+    const offer = await this.offerRepo
+      .createQueryBuilder('o')
+      .innerJoin('vendors', 'v', 'v.id = o.vendor_id')
+      .select([
+        'o.id AS id',
+        'o.vendor_id AS "vendorId"',
+        'o.title AS title',
+        'o.description AS description',
+        'o.category AS category',
+        'o.discount_percent AS "discountPercent"',
+        'o.original_price AS "originalPrice"',
+        'o.offer_price AS "offerPrice"',
+        'o.image_url AS "imageUrl"',
+        'o.coupon_code AS "couponCode"',
+        'o.redeem_url AS "redeemUrl"',
+        'o.max_redemptions AS "maxRedemptions"',
+        'o.current_redemptions AS "currentRedemptions"',
+        'o.valid_from AS "validFrom"',
+        'o.valid_until AS "validUntil"',
+        'o.is_active AS "isActive"',
+        'o.is_featured AS "isFeatured"',
+        'o.views AS views',
+        'o.clicks AS clicks',
+        'o.saves AS saves',
+        'v.business_name AS "businessName"',
+        'v.logo_url AS "vendorLogo"',
+        'v.city AS "vendorCity"',
+        'v.address AS "vendorAddress"',
+        'v.phone AS "vendorPhone"',
+        'v.website AS "vendorWebsite"',
+        'v.lat AS "vendorLat"',
+        'v.lng AS "vendorLng"',
+        'v.category AS "vendorCategory"',
+        'v.description AS "vendorDescription"',
+      ])
+      .where('o.id = :id', { id: offerId })
+      .getRawOne();
+
     if (!offer) throw new NotFoundException('Offer not found');
-    // coerce numeric strings
     const toNum = (v: any) => (v == null ? null : Number.parseFloat(v));
     return {
       ...offer,
@@ -196,18 +184,14 @@ export class OffersService {
   }
 
   async trackView(offerId: number) {
-    await this.db.query('UPDATE offers SET views = views + 1 WHERE id = $1', [offerId]);
+    await this.offerRepo.increment({ id: offerId }, 'views', 1);
   }
 
   async myOffers(userId: number) {
     const vendorId = await this.getVendorId(userId);
-    return this.db.query(
-      `SELECT id, title, category, description, discount_percent,
-              original_price, offer_price, image_url, coupon_code, redeem_url,
-              views, clicks, saves, is_active, valid_from, valid_until,
-              current_redemptions, max_redemptions, created_at
-       FROM offers WHERE vendor_id = $1 ORDER BY created_at DESC`,
-      [vendorId],
-    );
+    return this.offerRepo.find({
+      where: { vendor_id: vendorId },
+      order: { created_at: 'DESC' },
+    });
   }
 }

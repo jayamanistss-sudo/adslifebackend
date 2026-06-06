@@ -1,14 +1,19 @@
 import { Injectable } from '@nestjs/common';
-import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource } from 'typeorm';
+import { InjectRepository } from '@nestjs/typeorm';
+import { In, Repository } from 'typeorm';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as crypto from 'node:crypto';
 import axios from 'axios';
+import { UserFcmToken } from '../entities/user-fcm-token.entity';
+import { Notification } from '../entities/notification.entity';
 
 @Injectable()
 export class PushService {
-  constructor(@InjectDataSource() private readonly db: DataSource) {}
+  constructor(
+    @InjectRepository(UserFcmToken) private readonly userFcmTokenRepo: Repository<UserFcmToken>,
+    @InjectRepository(Notification) private readonly notifRepo: Repository<Notification>,
+  ) {}
 
   private getServiceAccount(): any {
     const p = path.join(__dirname, '../../config/firebase-service-account.json');
@@ -34,13 +39,13 @@ export class PushService {
     const sign = crypto.createSign('RSA-SHA256');
     sign.update(data);
     const sig = this.b64url(sign.sign(sa.private_key));
-    const jwt = `${data}.${sig}`;
+    const jwtToken = `${data}.${sig}`;
 
     try {
       const resp = await axios.post('https://oauth2.googleapis.com/token',
         new URLSearchParams({
           grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
-          assertion: jwt,
+          assertion: jwtToken,
         }).toString(),
         { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } },
       );
@@ -58,11 +63,7 @@ export class PushService {
     const ids = Array.isArray(userIds) ? userIds : [userIds];
     if (!ids.length) return 0;
 
-    const placeholders = ids.map((_: any, i: number) => `$${i + 1}`).join(',');
-    const tokens = await this.db.query(
-      `SELECT token, user_id FROM user_fcm_tokens WHERE user_id IN (${placeholders})`,
-      ids,
-    );
+    const tokens = await this.userFcmTokenRepo.find({ where: { user_id: In(ids) } });
     if (!tokens.length) return 0;
 
     const tokenMap: Record<string, number> = {};
@@ -90,10 +91,14 @@ export class PushService {
           const uid = tokenMap[token];
           const offerId = data.offer_id ? +data.offer_id : null;
           if (uid) {
-            await this.db.query(
-              'INSERT INTO notifications (user_id, title, body, type, offer_id, is_read) VALUES ($1, $2, $3, $4, $5, 0)',
-              [uid, title, body, data.type ?? 'push', offerId],
-            );
+            await this.notifRepo.save({
+              user_id: uid,
+              title,
+              body,
+              type: data.type ?? 'push',
+              offer_id: offerId,
+              is_read: false,
+            });
           }
         }
       } catch (e: any) {
@@ -103,14 +108,12 @@ export class PushService {
       }
     };
 
-    // Process in parallel batches capped at CONCURRENCY
     for (let i = 0; i < tokens.length; i += CONCURRENCY) {
       await Promise.all(tokens.slice(i, i + CONCURRENCY).map(({ token }: { token: string }) => sendOne(token)));
     }
 
     if (stale.length) {
-      const pl = stale.map((_: any, i: number) => `$${i + 1}`).join(',');
-      await this.db.query(`DELETE FROM user_fcm_tokens WHERE token IN (${pl})`, stale);
+      await this.userFcmTokenRepo.delete({ token: In(stale) });
     }
 
     return sent;

@@ -2,14 +2,15 @@ import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { ConfigService } from '@nestjs/config';
-import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource } from 'typeorm';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { User } from '../../entities/user.entity';
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
   constructor(
     config: ConfigService,
-    @InjectDataSource() private readonly db: DataSource,
+    @InjectRepository(User) private readonly userRepo: Repository<User>,
   ) {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
@@ -21,12 +22,12 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   async validate(payload: any) {
     if (!payload?.user_id) throw new UnauthorizedException();
 
-    const [user] = await this.db.query(
-      'SELECT is_active, token_invalidated_at FROM users WHERE id = $1',
-      [payload.user_id],
-    );
+    const user = await this.userRepo.findOne({
+      where: { id: payload.user_id },
+      select: ['id', 'is_active', 'token_invalidated_at'],
+    });
 
-    if (!user || !user.is_active) {
+    if (!user?.is_active) {
       throw new UnauthorizedException('Account is inactive or banned');
     }
 

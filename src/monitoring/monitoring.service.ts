@@ -1,6 +1,15 @@
 import { Injectable } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
 import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource } from 'typeorm';
+import { DataSource, In, MoreThanOrEqual, ObjectLiteral, Repository } from 'typeorm';
+import { AuthLog, AuthAction } from '../entities/auth-log.entity';
+import { ActivityLog } from '../entities/activity-log.entity';
+import { ApiLog } from '../entities/api-log.entity';
+import { ErrorLog } from '../entities/error-log.entity';
+import { SecurityEvent } from '../entities/security-event.entity';
+import { AlertLog } from '../entities/alert-log.entity';
+import { BlockedIp } from '../entities/blocked-ip.entity';
+import { User } from '../entities/user.entity';
 
 const SENSITIVE = new Set([
   'password', 'password_hash', 'token', 'otp', 'secret', 'api_key',
@@ -26,9 +35,22 @@ function trunc(s: any, max = 2000): string | null {
   return str.length > max ? str.slice(0, max) + '…' : str;
 }
 
+function subtractMinutes(minutes: number): Date {
+  return new Date(Date.now() - minutes * 60 * 1000);
+}
+
 @Injectable()
 export class MonitoringService {
-  constructor(@InjectDataSource() private readonly db: DataSource) {}
+  constructor(
+    @InjectRepository(AuthLog) private readonly authLogRepo: Repository<AuthLog>,
+    @InjectRepository(ActivityLog) private readonly activityLogRepo: Repository<ActivityLog>,
+    @InjectRepository(ApiLog) private readonly apiLogRepo: Repository<ApiLog>,
+    @InjectRepository(ErrorLog) private readonly errorLogRepo: Repository<ErrorLog>,
+    @InjectRepository(SecurityEvent) private readonly securityEventRepo: Repository<SecurityEvent>,
+    @InjectRepository(AlertLog) private readonly alertLogRepo: Repository<AlertLog>,
+    @InjectRepository(BlockedIp) private readonly blockedIpRepo: Repository<BlockedIp>,
+    @InjectDataSource() private readonly dataSource: DataSource,
+  ) {}
 
   // ─── Writers (fire-and-forget safe) ─────────────────────────────────────────
 
@@ -39,20 +61,21 @@ export class MonitoringService {
     deviceInfo?: any; responseTimeMs: number; isSuspicious?: boolean;
   }) {
     try {
-      await this.db.query(
-        `INSERT INTO api_logs (request_id,user_id,role,ip_address,method,endpoint,status_code,
-          request_body,response_body,user_agent,device_info,response_time_ms,is_suspicious)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
-        [
-          d.requestId, d.userId ?? null, d.role ?? null, d.ipAddress,
-          d.method, trunc(d.endpoint, 500), d.statusCode,
-          d.requestBody ? JSON.stringify(sanitize(d.requestBody)) : null,
-          d.responseBody ? JSON.stringify(sanitize(d.responseBody)) : null,
-          trunc(d.userAgent, 500),
-          d.deviceInfo ? JSON.stringify(d.deviceInfo) : null,
-          d.responseTimeMs, d.isSuspicious ? 1 : 0,
-        ],
-      );
+      await this.apiLogRepo.save({
+        request_id: d.requestId,
+        user_id: d.userId ?? null,
+        role: d.role ?? null,
+        ip_address: d.ipAddress,
+        method: d.method,
+        endpoint: trunc(d.endpoint, 500) ?? '',
+        status_code: d.statusCode,
+        request_body: d.requestBody ? JSON.stringify(sanitize(d.requestBody)) : null,
+        response_body: d.responseBody ? JSON.stringify(sanitize(d.responseBody)) : null,
+        user_agent: trunc(d.userAgent, 500) ?? null,
+        device_info: d.deviceInfo ?? null,
+        response_time_ms: d.responseTimeMs,
+        is_suspicious: d.isSuspicious ?? false,
+      });
     } catch { /* never block pipeline */ }
   }
 
@@ -64,18 +87,18 @@ export class MonitoringService {
     failureReason?: string; metadata?: any;
   }) {
     try {
-      await this.db.query(
-        `INSERT INTO auth_logs (request_id,user_id,email,role,action,ip_address,
-          user_agent,device_info,failure_reason,metadata)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-        [
-          d.requestId ?? null, d.userId ?? null, d.email ?? null, d.role ?? null,
-          d.action, d.ipAddress, trunc(d.userAgent, 500),
-          d.deviceInfo ? JSON.stringify(d.deviceInfo) : null,
-          trunc(d.failureReason, 500),
-          d.metadata ? JSON.stringify(sanitize(d.metadata)) : null,
-        ],
-      );
+      await this.authLogRepo.save({
+        request_id: d.requestId ?? null,
+        user_id: d.userId ?? null,
+        email: d.email ?? null,
+        role: d.role ?? null,
+        action: d.action as AuthAction,
+        ip_address: d.ipAddress,
+        user_agent: trunc(d.userAgent, 500),
+        device_info: d.deviceInfo ?? null,
+        failure_reason: trunc(d.failureReason, 500),
+        metadata: d.metadata ? sanitize(d.metadata) : null,
+      });
     } catch { /* never throw */ }
   }
 
@@ -85,17 +108,17 @@ export class MonitoringService {
     metadata?: any; ipAddress?: string;
   }) {
     try {
-      await this.db.query(
-        `INSERT INTO activity_logs (request_id,user_id,role,action,entity_type,
-          entity_id,description,metadata,ip_address)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-        [
-          d.requestId ?? null, d.userId, d.role, d.action,
-          d.entityType ?? null, d.entityId ?? null, trunc(d.description, 500),
-          d.metadata ? JSON.stringify(sanitize(d.metadata)) : null,
-          d.ipAddress ?? null,
-        ],
-      );
+      await this.activityLogRepo.save({
+        request_id: d.requestId ?? null,
+        user_id: d.userId,
+        role: d.role,
+        action: d.action,
+        entity_type: d.entityType ?? null,
+        entity_id: d.entityId ?? null,
+        description: trunc(d.description, 500),
+        metadata: d.metadata ? sanitize(d.metadata) : null,
+        ip_address: d.ipAddress ?? null,
+      });
     } catch { /* never throw */ }
   }
 
@@ -105,18 +128,18 @@ export class MonitoringService {
     errorType: string; errorMessage: string; stackTrace?: string; metadata?: any;
   }) {
     try {
-      await this.db.query(
-        `INSERT INTO error_logs (request_id,user_id,ip_address,endpoint,method,status_code,
-          error_type,error_message,stack_trace,metadata)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-        [
-          d.requestId ?? null, d.userId ?? null, d.ipAddress ?? null,
-          trunc(d.endpoint, 500), d.method ?? null, d.statusCode ?? null,
-          trunc(d.errorType, 100), trunc(d.errorMessage, 2000),
-          process.env.APP_ENV !== 'production' ? trunc(d.stackTrace, 5000) : null,
-          d.metadata ? JSON.stringify(sanitize(d.metadata)) : null,
-        ],
-      );
+      await this.errorLogRepo.save({
+        request_id: d.requestId ?? null,
+        user_id: d.userId ?? null,
+        ip_address: d.ipAddress ?? null,
+        endpoint: trunc(d.endpoint, 500),
+        method: d.method ?? null,
+        status_code: d.statusCode ?? null,
+        error_type: trunc(d.errorType, 100) as string,
+        error_message: trunc(d.errorMessage, 2000) as string,
+        stack_trace: process.env.APP_ENV === 'production' ? null : trunc(d.stackTrace, 5000),
+        metadata: d.metadata ? sanitize(d.metadata) : null,
+      });
     } catch { /* never throw */ }
   }
 
@@ -126,15 +149,15 @@ export class MonitoringService {
     description: string; metadata?: any;
   }) {
     try {
-      await this.db.query(
-        `INSERT INTO security_events (event_type,severity,user_id,ip_address,endpoint,description,metadata)
-         VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-        [
-          d.eventType, d.severity, d.userId ?? null, d.ipAddress,
-          d.endpoint ?? null, trunc(d.description, 2000),
-          d.metadata ? JSON.stringify(d.metadata) : null,
-        ],
-      );
+      await this.securityEventRepo.save({
+        event_type: d.eventType,
+        severity: d.severity,
+        user_id: d.userId ?? null,
+        ip_address: d.ipAddress,
+        endpoint: d.endpoint ?? null,
+        description: trunc(d.description, 2000) ?? '',
+        metadata: d.metadata ?? null,
+      });
     } catch { /* never throw */ }
   }
 
@@ -143,15 +166,14 @@ export class MonitoringService {
     title: string; message: string; metadata?: any; channels?: string[];
   }) {
     try {
-      await this.db.query(
-        `INSERT INTO alert_logs (alert_type,severity,title,message,metadata,notified_channels)
-         VALUES ($1,$2,$3,$4,$5,$6)`,
-        [
-          d.alertType, d.severity, trunc(d.title, 255), trunc(d.message, 2000),
-          d.metadata ? JSON.stringify(d.metadata) : null,
-          JSON.stringify(d.channels ?? ['dashboard']),
-        ],
-      );
+      await this.alertLogRepo.save({
+        alert_type: d.alertType,
+        severity: d.severity,
+        title: trunc(d.title, 255) as string,
+        message: trunc(d.message, 2000) as string,
+        metadata: d.metadata ?? null,
+        notified_channels: d.channels ?? ['dashboard'],
+      });
     } catch { /* never throw */ }
   }
 
@@ -159,62 +181,70 @@ export class MonitoringService {
 
   async isBlockedIp(ip: string): Promise<boolean> {
     try {
-      const [row] = await this.db.query(
-        `SELECT id FROM blocked_ips WHERE ip_address = $1
-         AND (expires_at IS NULL OR expires_at > NOW())`,
-        [ip],
-      );
+      const now = new Date();
+      const row = await this.blockedIpRepo
+        .createQueryBuilder('b')
+        .where('b.ip_address = :ip', { ip })
+        .andWhere('(b.expires_at IS NULL OR b.expires_at > :now)', { now })
+        .getOne();
       return !!row;
     } catch { return false; }
   }
 
   async blockIp(ip: string, reason: string, blockedBy: number, expiresAt?: Date) {
-    await this.db.query(
-      `INSERT INTO blocked_ips (ip_address,reason,blocked_by,expires_at) VALUES ($1,$2,$3,$4)
-       ON CONFLICT (ip_address) DO UPDATE SET reason=$2, blocked_by=$3, expires_at=$4`,
-      [ip, reason, blockedBy, expiresAt ?? null],
-    );
+    const existing = await this.blockedIpRepo.findOne({ where: { ip_address: ip } });
+    if (existing) {
+      await this.blockedIpRepo.update(existing.id, {
+        reason,
+        blocked_by: blockedBy,
+        expires_at: expiresAt ?? null,
+      });
+    } else {
+      await this.blockedIpRepo.save({
+        ip_address: ip,
+        reason,
+        blocked_by: blockedBy,
+        expires_at: expiresAt ?? null,
+      });
+    }
   }
 
   async unblockIp(ip: string) {
-    const result = await this.db.query('DELETE FROM blocked_ips WHERE ip_address = $1', [ip]);
-    return (result[1] ?? 0) > 0; // TypeORM returns [rows, rowCount] for raw queries
+    const result = await this.blockedIpRepo.delete({ ip_address: ip });
+    return (result.affected ?? 0) > 0;
   }
 
   // ─── Security Helpers ────────────────────────────────────────────────────────
 
   async recentFailedLogins(ip: string, minutes: number): Promise<number> {
     try {
-      const [{ cnt }] = await this.db.query(
-        `SELECT COUNT(*) as cnt FROM auth_logs
-         WHERE ip_address=$1 AND action='login_failure'
-         AND created_at >= NOW() - ($2 * INTERVAL '1 minute')`,
-        [ip, minutes],
-      );
-      return +cnt;
+      return await this.authLogRepo.count({
+        where: {
+          ip_address: ip,
+          action: AuthAction.LOGIN_FAILURE,
+          created_at: MoreThanOrEqual(subtractMinutes(minutes)),
+        },
+      });
     } catch { return 0; }
   }
 
   async recentRequestCount(ip: string, minutes: number): Promise<number> {
     try {
-      const [{ cnt }] = await this.db.query(
-        `SELECT COUNT(*) as cnt FROM api_logs
-         WHERE ip_address=$1 AND created_at >= NOW() - ($2 * INTERVAL '1 minute')`,
-        [ip, minutes],
-      );
-      return +cnt;
+      return await this.apiLogRepo.count({
+        where: { ip_address: ip, created_at: MoreThanOrEqual(subtractMinutes(minutes)) },
+      });
     } catch { return 0; }
   }
 
   async recentUnauthorizedCount(ip: string, minutes: number): Promise<number> {
     try {
-      const [{ cnt }] = await this.db.query(
-        `SELECT COUNT(*) as cnt FROM api_logs
-         WHERE ip_address=$1 AND status_code IN (401,403)
-         AND created_at >= NOW() - ($2 * INTERVAL '1 minute')`,
-        [ip, minutes],
-      );
-      return +cnt;
+      return await this.apiLogRepo.count({
+        where: {
+          ip_address: ip,
+          status_code: In([401, 403]),
+          created_at: MoreThanOrEqual(subtractMinutes(minutes)),
+        },
+      });
     } catch { return 0; }
   }
 
@@ -222,125 +252,128 @@ export class MonitoringService {
 
   async getOverview() {
     const today = new Date().toISOString().slice(0, 10);
+
     const [
-      [totalReq], [activeUsers], [failedLogins], [err4xx], [err5xx],
-      [avgResp], topApis, topIps, [suspicious], [unreadAlerts],
+      totalReq, activeUsers, failedLogins, err4xx, err5xx,
+      avgResp, topApis, topIps, suspicious, unreadAlerts,
       hourlyTrend, recentErrors,
     ] = await Promise.all([
-      this.db.query(`SELECT COUNT(*) as cnt FROM api_logs WHERE created_at::date=$1`, [today]),
-      this.db.query(`SELECT COUNT(DISTINCT user_id) as cnt FROM api_logs WHERE created_at::date=$1 AND user_id IS NOT NULL`, [today]),
-      this.db.query(`SELECT COUNT(*) as cnt FROM auth_logs WHERE action='login_failure' AND created_at::date=$1`, [today]),
-      this.db.query(`SELECT COUNT(*) as cnt FROM api_logs WHERE status_code BETWEEN 400 AND 499 AND created_at::date=$1`, [today]),
-      this.db.query(`SELECT COUNT(*) as cnt FROM api_logs WHERE status_code>=500 AND created_at::date=$1`, [today]),
-      this.db.query(`SELECT ROUND(AVG(response_time_ms)::numeric,0) as avg FROM api_logs WHERE created_at::date=$1`, [today]),
-      this.db.query(`SELECT endpoint, COUNT(*) as count FROM api_logs WHERE created_at::date=$1 GROUP BY endpoint ORDER BY count DESC LIMIT 10`, [today]),
-      this.db.query(`SELECT ip_address, COUNT(*) as count FROM api_logs WHERE created_at::date=$1 GROUP BY ip_address ORDER BY count DESC LIMIT 10`, [today]),
-      this.db.query(`SELECT COUNT(*) as cnt FROM security_events WHERE is_resolved=false AND created_at::date=$1`, [today]),
-      this.db.query(`SELECT COUNT(*) as cnt FROM alert_logs WHERE is_read=false`),
-      this.db.query(`SELECT EXTRACT(HOUR FROM created_at) as hr, COUNT(*) as count FROM api_logs WHERE created_at::date=$1 GROUP BY EXTRACT(HOUR FROM created_at) ORDER BY hr`, [today]),
-      this.db.query(`SELECT id,endpoint,method,status_code,error_message,created_at FROM error_logs ORDER BY created_at DESC LIMIT 5`),
+      this.apiLogRepo.createQueryBuilder('l').select('COUNT(*)', 'cnt').where('l.created_at::date = :today', { today }).getRawOne(),
+      this.apiLogRepo.createQueryBuilder('l').select('COUNT(DISTINCT l.user_id)', 'cnt').where('l.created_at::date = :today AND l.user_id IS NOT NULL', { today }).getRawOne(),
+      this.authLogRepo.createQueryBuilder('l').select('COUNT(*)', 'cnt').where("l.action = 'login_failure' AND l.created_at::date = :today", { today }).getRawOne(),
+      this.apiLogRepo.createQueryBuilder('l').select('COUNT(*)', 'cnt').where('l.status_code BETWEEN 400 AND 499 AND l.created_at::date = :today', { today }).getRawOne(),
+      this.apiLogRepo.createQueryBuilder('l').select('COUNT(*)', 'cnt').where('l.status_code >= 500 AND l.created_at::date = :today', { today }).getRawOne(),
+      this.apiLogRepo.createQueryBuilder('l').select('ROUND(AVG(l.response_time_ms)::numeric, 0)', 'avg').where('l.created_at::date = :today', { today }).getRawOne(),
+      this.apiLogRepo.createQueryBuilder('l').select(['l.endpoint AS endpoint', 'COUNT(*) AS count']).where('l.created_at::date = :today', { today }).groupBy('l.endpoint').orderBy('count', 'DESC').limit(10).getRawMany(),
+      this.apiLogRepo.createQueryBuilder('l').select(['l.ip_address AS ip_address', 'COUNT(*) AS count']).where('l.created_at::date = :today', { today }).groupBy('l.ip_address').orderBy('count', 'DESC').limit(10).getRawMany(),
+      this.securityEventRepo.createQueryBuilder('e').select('COUNT(*)', 'cnt').where('e.is_resolved = false AND e.created_at::date = :today', { today }).getRawOne(),
+      this.alertLogRepo.createQueryBuilder('a').select('COUNT(*)', 'cnt').where('a.is_read = false').getRawOne(),
+      this.apiLogRepo.createQueryBuilder('l').select(['EXTRACT(HOUR FROM l.created_at) AS hr', 'COUNT(*) AS count']).where('l.created_at::date = :today', { today }).groupBy('EXTRACT(HOUR FROM l.created_at)').orderBy('hr', 'ASC').getRawMany(),
+      this.errorLogRepo.createQueryBuilder('e').select(['e.id', 'e.endpoint', 'e.method', 'e.status_code', 'e.error_message', 'e.created_at']).orderBy('e.created_at', 'DESC').limit(5).getMany(),
     ]);
 
     return {
       today,
-      total_requests: +totalReq.cnt,
-      active_users: +activeUsers.cnt,
-      failed_logins: +failedLogins.cnt,
-      errors_4xx: +err4xx.cnt,
-      errors_5xx: +err5xx.cnt,
-      avg_response_ms: +(avgResp.avg ?? 0),
+      total_requests: +(totalReq?.cnt ?? 0),
+      active_users: +(activeUsers?.cnt ?? 0),
+      failed_logins: +(failedLogins?.cnt ?? 0),
+      errors_4xx: +(err4xx?.cnt ?? 0),
+      errors_5xx: +(err5xx?.cnt ?? 0),
+      avg_response_ms: +(avgResp?.avg ?? 0),
       top_apis: topApis,
       top_ips: topIps,
-      suspicious_count: +suspicious.cnt,
-      unread_alerts: +unreadAlerts.cnt,
+      suspicious_count: +(suspicious?.cnt ?? 0),
+      unread_alerts: +(unreadAlerts?.cnt ?? 0),
       hourly_trend: hourlyTrend,
       recent_errors: recentErrors,
     };
   }
 
   async getApiLogs(q: any) {
-    return this._paginate('api_logs', q, [
-      ['from_date', 'created_at >= $?', (v: string) => v + ' 00:00:00'],
-      ['to_date', 'created_at <= $?', (v: string) => v + ' 23:59:59'],
-      ['user_id', 'user_id = $?', Number],
-      ['role', 'role = $?'],
-      ['ip_address', 'ip_address = $?'],
-      ['endpoint', 'endpoint LIKE $?', (v: string) => `%${v}%`],
-      ['status_code', 'status_code = $?', Number],
-      ['errors_only', 'status_code >= 400', null, true],
-      ['suspicious_only', 'is_suspicious = true', null, true],
-      ['search', '(endpoint LIKE $? OR ip_address LIKE $? OR role LIKE $?)', (v: string) => [`%${v}%`, `%${v}%`, `%${v}%`]],
+    return this._paginateRepo(this.apiLogRepo, 'l', q, [
+      { key: 'from_date', clause: "l.created_at >= :p", transform: (v: string) => v + ' 00:00:00' },
+      { key: 'to_date', clause: "l.created_at <= :p", transform: (v: string) => v + ' 23:59:59' },
+      { key: 'user_id', clause: 'l.user_id = :p', transform: Number },
+      { key: 'role', clause: 'l.role = :p' },
+      { key: 'ip_address', clause: 'l.ip_address = :p' },
+      { key: 'endpoint', clause: 'l.endpoint LIKE :p', transform: (v: string) => `%${v}%` },
+      { key: 'status_code', clause: 'l.status_code = :p', transform: Number },
+      { key: 'errors_only', clause: 'l.status_code >= 400', flag: true },
+      { key: 'suspicious_only', clause: 'l.is_suspicious = true', flag: true },
+      { key: 'search', clause: '(l.endpoint LIKE :p0 OR l.ip_address LIKE :p1 OR l.role LIKE :p2)', transform: (v: string) => [`%${v}%`, `%${v}%`, `%${v}%`] },
     ]);
   }
 
   async getAuthLogs(q: any) {
-    return this._paginate('auth_logs', q, [
-      ['from_date', 'created_at >= $?', (v: string) => v + ' 00:00:00'],
-      ['to_date', 'created_at <= $?', (v: string) => v + ' 23:59:59'],
-      ['user_id', 'user_id = $?', Number],
-      ['ip_address', 'ip_address = $?'],
-      ['action', 'action = $?'],
-      ['search', '(email LIKE $? OR ip_address LIKE $?)', (v: string) => [`%${v}%`, `%${v}%`]],
+    return this._paginateRepo(this.authLogRepo, 'l', q, [
+      { key: 'from_date', clause: "l.created_at >= :p", transform: (v: string) => v + ' 00:00:00' },
+      { key: 'to_date', clause: "l.created_at <= :p", transform: (v: string) => v + ' 23:59:59' },
+      { key: 'user_id', clause: 'l.user_id = :p', transform: Number },
+      { key: 'ip_address', clause: 'l.ip_address = :p' },
+      { key: 'action', clause: 'l.action = :p' },
+      { key: 'search', clause: '(l.email LIKE :p0 OR l.ip_address LIKE :p1)', transform: (v: string) => [`%${v}%`, `%${v}%`] },
     ]);
   }
 
   async getActivityLogs(q: any) {
-    return this._paginate('activity_logs', q, [
-      ['from_date', 'created_at >= $?', (v: string) => v + ' 00:00:00'],
-      ['to_date', 'created_at <= $?', (v: string) => v + ' 23:59:59'],
-      ['user_id', 'user_id = $?', Number],
-      ['role', 'role = $?'],
-      ['action', 'action LIKE $?', (v: string) => `%${v}%`],
-      ['search', '(action LIKE $? OR description LIKE $?)', (v: string) => [`%${v}%`, `%${v}%`]],
+    return this._paginateRepo(this.activityLogRepo, 'l', q, [
+      { key: 'from_date', clause: "l.created_at >= :p", transform: (v: string) => v + ' 00:00:00' },
+      { key: 'to_date', clause: "l.created_at <= :p", transform: (v: string) => v + ' 23:59:59' },
+      { key: 'user_id', clause: 'l.user_id = :p', transform: Number },
+      { key: 'role', clause: 'l.role = :p' },
+      { key: 'action', clause: 'l.action LIKE :p', transform: (v: string) => `%${v}%` },
+      { key: 'search', clause: '(l.action LIKE :p0 OR l.description LIKE :p1)', transform: (v: string) => [`%${v}%`, `%${v}%`] },
     ]);
   }
 
   async getErrorLogs(q: any) {
-    return this._paginate('error_logs', q, [
-      ['from_date', 'created_at >= $?', (v: string) => v + ' 00:00:00'],
-      ['to_date', 'created_at <= $?', (v: string) => v + ' 23:59:59'],
-      ['user_id', 'user_id = $?', Number],
-      ['status_code', 'status_code = $?', Number],
-      ['search', '(error_message LIKE $? OR endpoint LIKE $?)', (v: string) => [`%${v}%`, `%${v}%`]],
+    return this._paginateRepo(this.errorLogRepo, 'l', q, [
+      { key: 'from_date', clause: "l.created_at >= :p", transform: (v: string) => v + ' 00:00:00' },
+      { key: 'to_date', clause: "l.created_at <= :p", transform: (v: string) => v + ' 23:59:59' },
+      { key: 'user_id', clause: 'l.user_id = :p', transform: Number },
+      { key: 'status_code', clause: 'l.status_code = :p', transform: Number },
+      { key: 'search', clause: '(l.error_message LIKE :p0 OR l.endpoint LIKE :p1)', transform: (v: string) => [`%${v}%`, `%${v}%`] },
     ]);
   }
 
   async getSecurityEvents(q: any) {
-    return this._paginate('security_events', q, [
-      ['from_date', 'created_at >= $?', (v: string) => v + ' 00:00:00'],
-      ['to_date', 'created_at <= $?', (v: string) => v + ' 23:59:59'],
-      ['ip_address', 'ip_address = $?'],
-      ['severity', 'severity = $?'],
-      ['search', '(description LIKE $? OR event_type LIKE $?)', (v: string) => [`%${v}%`, `%${v}%`]],
+    return this._paginateRepo(this.securityEventRepo, 'e', q, [
+      { key: 'from_date', clause: "e.created_at >= :p", transform: (v: string) => v + ' 00:00:00' },
+      { key: 'to_date', clause: "e.created_at <= :p", transform: (v: string) => v + ' 23:59:59' },
+      { key: 'ip_address', clause: 'e.ip_address = :p' },
+      { key: 'severity', clause: 'e.severity = :p' },
+      { key: 'search', clause: '(e.description LIKE :p0 OR e.event_type LIKE :p1)', transform: (v: string) => [`%${v}%`, `%${v}%`] },
     ]);
   }
 
   async getAlerts(q: any) {
-    return this._paginate('alert_logs', q, [
-      ['severity', 'severity = $?'],
-      ['search', '(title LIKE $? OR message LIKE $?)', (v: string) => [`%${v}%`, `%${v}%`]],
+    return this._paginateRepo(this.alertLogRepo, 'a', q, [
+      { key: 'severity', clause: 'a.severity = :p' },
+      { key: 'search', clause: '(a.title LIKE :p0 OR a.message LIKE :p1)', transform: (v: string) => [`%${v}%`, `%${v}%`] },
     ]);
   }
 
   async markAlertRead(id: number) {
-    await this.db.query('UPDATE alert_logs SET is_read=true WHERE id=$1', [id]);
+    await this.alertLogRepo.update(id, { is_read: true });
     return { updated: true };
   }
 
   async getBlockedIps() {
-    return this.db.query(
-      `SELECT bi.*, u.name as blocked_by_name
-       FROM blocked_ips bi LEFT JOIN users u ON bi.blocked_by=u.id
-       ORDER BY bi.created_at DESC`,
-    );
+    return this.blockedIpRepo
+      .createQueryBuilder('bi')
+      .leftJoin(User, 'u', 'u.id = bi.blocked_by')
+      .select(['bi.*', 'u.name AS blocked_by_name'])
+      .orderBy('bi.created_at', 'DESC')
+      .getRawMany();
   }
 
   async resolveSecurityEvent(id: number, adminId: number) {
-    const result = await this.db.query(
-      'UPDATE security_events SET is_resolved=true, resolved_at=NOW(), resolved_by=$1 WHERE id=$2',
-      [adminId, id],
-    );
-    return (result[1] ?? 0) > 0; // TypeORM returns [rows, rowCount] for raw queries
+    const result = await this.securityEventRepo.update(id, {
+      is_resolved: true,
+      resolved_at: new Date(),
+      resolved_by: adminId,
+    });
+    return (result.affected ?? 0) > 0;
   }
 
   async exportCsv(type: string, q: any): Promise<string> {
@@ -362,59 +395,67 @@ export class MonitoringService {
         headers.map(h => {
           const v = r[h] ?? '';
           const s = typeof v === 'object' ? JSON.stringify(v) : String(v);
-          return `"${s.replace(/"/g, '""')}"`;
+          return `"${s.replaceAll('"', '""')}"`;
         }).join(',')
       ),
     ];
     return lines.join('\n');
   }
 
-  // ─── Internal helpers ─────────────────────────────────────────────────────────
+  // ─── Internal paginate helper ─────────────────────────────────────────────────
 
-  private async _paginate(table: string, q: any, filters: any[]) {
+  private _applyFilter<T extends ObjectLiteral>(
+    qb: ReturnType<Repository<T>['createQueryBuilder']>,
+    f: { key: string; clause: string; transform?: (v: any) => any; flag?: boolean },
+    val: any,
+    idx: number,
+  ): number {
+    if (f.flag) {
+      if (val === true || val === 'true') qb.andWhere(f.clause);
+      return idx;
+    }
+    const mapped = f.transform ? f.transform(val) : val;
+    if (Array.isArray(mapped)) {
+      let clause = f.clause;
+      const params: Record<string, any> = {};
+      mapped.forEach((v, i) => {
+        const pk = `p${idx++}`;
+        clause = clause.replace(`:p${i}`, `:${pk}`);
+        params[pk] = v;
+      });
+      qb.andWhere(clause, params);
+    } else {
+      const pk = `p${idx++}`;
+      qb.andWhere(f.clause.replace(':p', `:${pk}`), { [pk]: mapped });
+    }
+    return idx;
+  }
+
+  private async _paginateRepo<T extends ObjectLiteral>(
+    repo: Repository<T>,
+    alias: string,
+    q: any,
+    filters: Array<{ key: string; clause: string; transform?: (v: any) => any; flag?: boolean }>,
+  ) {
     const { page = 1, per_page = 50 } = q;
-    const where: string[] = [];
-    const params: any[] = [];
+    const qb = repo.createQueryBuilder(alias);
+    let idx = 0;
 
-    for (const [key, clauseTemplate, transform, flag] of filters) {
-      const val = q[key];
-      if (val === undefined || val === null || val === '' || val === false) continue;
-      if (flag) {
-        if (val === true || val === 'true') where.push(clauseTemplate as string);
-        continue;
-      }
-
-      // Replace $? placeholders with actual numbered params
-      const applyClause = (clause: string, values: any[]) => {
-        let result = clause;
-        for (const v of values) {
-          params.push(v);
-          result = result.replace('$?', `$${params.length}`);
-        }
-        where.push(result);
-      };
-
-      if (!transform) {
-        applyClause(clauseTemplate as string, [val]);
-      } else {
-        const mapped = (transform as Function)(val);
-        if (Array.isArray(mapped)) {
-          applyClause(clauseTemplate as string, mapped);
-        } else {
-          applyClause(clauseTemplate as string, [mapped]);
-        }
-      }
+    for (const f of filters) {
+      const val = q[f.key];
+      const isEmpty = val === undefined || val === null || val === '' || val === false;
+      if (isEmpty) continue;
+      idx = this._applyFilter(qb, f, val, idx);
     }
 
-    const whereStr = where.length ? 'WHERE ' + where.join(' AND ') : '';
+    const total = await qb.getCount();
     const offset = (+page - 1) * +per_page;
+    const data = await qb
+      .orderBy(`${alias}.created_at`, 'DESC')
+      .limit(+per_page)
+      .offset(offset)
+      .getMany();
 
-    const [{ total }] = await this.db.query(`SELECT COUNT(*) as total FROM ${table} ${whereStr}`, params);
-    params.push(+per_page, offset);
-    const data = await this.db.query(
-      `SELECT * FROM ${table} ${whereStr} ORDER BY created_at DESC LIMIT $${params.length - 1} OFFSET $${params.length}`,
-      params,
-    );
-    return { total: +total, page: +page, per_page: +per_page, data };
+    return { total, page: +page, per_page: +per_page, data };
   }
 }

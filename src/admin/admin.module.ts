@@ -9,9 +9,21 @@ import { Offer } from '../entities/offer.entity';
 import { SiteSetting } from '../entities/site-setting.entity';
 import { VendorDailyStat } from '../entities/vendor-daily-stat.entity';
 import { UserInteraction } from '../entities/user-interaction.entity';
+import { VendorApplication } from '../entities/vendor-application.entity';
+import { SubscriptionPlan } from '../entities/subscription-plan.entity';
+import { FraudFlag } from '../entities/fraud-flag.entity';
+import { Payment } from '../entities/payment.entity';
+import { UserFcmToken } from '../entities/user-fcm-token.entity';
+import { Notification } from '../entities/notification.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([User, Vendor, Offer, SiteSetting, VendorDailyStat, UserInteraction])],
+  imports: [
+    TypeOrmModule.forFeature([
+      User, Vendor, Offer, SiteSetting, VendorDailyStat, UserInteraction,
+      VendorApplication, SubscriptionPlan, FraudFlag, Payment,
+      UserFcmToken, Notification,
+    ]),
+  ],
   controllers: [AdminController],
   providers: [AdminService, PushService],
 })

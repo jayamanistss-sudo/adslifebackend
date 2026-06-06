@@ -1,7 +1,10 @@
 import { Injectable, InternalServerErrorException } from '@nestjs/common';
-import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource } from 'typeorm';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import * as nodemailer from 'nodemailer';
+import { User } from '../entities/user.entity';
+import { Offer } from '../entities/offer.entity';
+import { Vendor } from '../entities/vendor.entity';
 
 @Injectable()
 export class InviteService {
@@ -14,7 +17,10 @@ export class InviteService {
       })
     : null;
 
-  constructor(@InjectDataSource() private readonly db: DataSource) {}
+  constructor(
+    @InjectRepository(User) private readonly userRepo: Repository<User>,
+    @InjectRepository(Offer) private readonly offerRepo: Repository<Offer>,
+  ) {}
 
   private escapeHtml(text: string): string {
     return text
@@ -26,7 +32,10 @@ export class InviteService {
   }
 
   async sendInviteEmail(senderId: number, toEmail: string, offerId?: number, customMessage?: string) {
-    const [sender] = await this.db.query('SELECT name, referral_code FROM users WHERE id = $1', [senderId]);
+    const sender = await this.userRepo.findOne({
+      where: { id: senderId },
+      select: ['name', 'referral_code'],
+    });
     if (!sender) throw new InternalServerErrorException('Sender not found');
 
     const appUrl = process.env.APP_URL || 'https://adslife.in';
@@ -34,15 +43,17 @@ export class InviteService {
 
     let offerSection = '';
     if (offerId) {
-      const [offer] = await this.db.query(
-        'SELECT o.title, o.discount_percent, v.business_name FROM offers o JOIN vendors v ON o.vendor_id = v.id WHERE o.id = $1',
-        [offerId],
-      );
-      if (offer) {
+      const offerRow = await this.offerRepo
+        .createQueryBuilder('o')
+        .innerJoin(Vendor, 'v', 'v.id = o.vendor_id')
+        .select(['o.title AS title', 'o.discount_percent AS discount_percent', 'v.business_name AS business_name'])
+        .where('o.id = :id', { id: offerId })
+        .getRawOne();
+      if (offerRow) {
         offerSection = `
           <div style="background:#fff3e0;border-left:4px solid #FF6200;padding:16px;border-radius:8px;margin:16px 0;">
-            <p style="margin:0;font-weight:600;color:#FF6200;">${offer.discount_percent}% OFF</p>
-            <p style="margin:4px 0 0;color:#333;">${offer.title} — ${offer.business_name}</p>
+            <p style="margin:0;font-weight:600;color:#FF6200;">${offerRow.discount_percent}% OFF</p>
+            <p style="margin:4px 0 0;color:#333;">${offerRow.title} — ${offerRow.business_name}</p>
             <a href="${appUrl}/offer/${offerId}" style="display:inline-block;margin-top:10px;background:#FF6200;color:#fff;padding:8px 20px;border-radius:6px;text-decoration:none;font-size:14px;">View Offer</a>
           </div>`;
       }
