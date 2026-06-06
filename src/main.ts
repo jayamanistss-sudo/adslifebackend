@@ -13,8 +13,19 @@ async function bootstrap() {
   // Capture raw body for Cashfree webhook HMAC verification BEFORE json parsing
   app.use('/api/payment/webhook', express.raw({ type: 'application/json' }));
 
-  // Security headers
-  app.use(helmet());
+  // Security headers (CSP relaxed for monitor dashboard CDN assets)
+  app.use(helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'", "'unsafe-inline'", 'cdn.jsdelivr.net'],
+        styleSrc: ["'self'", "'unsafe-inline'", 'cdn.jsdelivr.net'],
+        imgSrc: ["'self'", 'data:', 'https:'],
+        connectSrc: ["'self'"],
+        fontSrc: ["'self'", 'cdn.jsdelivr.net'],
+      },
+    },
+  }));
 
   // Request size limit
   app.use(express.json({ limit: '10mb' }));
