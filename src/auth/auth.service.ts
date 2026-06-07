@@ -72,6 +72,11 @@ export class AuthService {
       role: user.role, action: 'login_success',
       ipAddress: ctx?.ip ?? '0.0.0.0', userAgent: ctx?.ua,
     }).catch(() => {}));
+    if (dto.lat != null && dto.lng != null) {
+      setImmediate(() =>
+        this.updateLocation(user.id, dto.lat!, dto.lng!, dto.city, dto.accuracy, 'gps').catch(() => {}),
+      );
+    }
     const token = this.generateToken(user.id, user.role);
     const { password_hash: _pw, ...userOut } = user as any;
     return { user: userOut, token };
