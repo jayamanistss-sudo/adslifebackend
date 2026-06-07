@@ -3,7 +3,7 @@ import {
   UseGuards, HttpCode, HttpStatus, Req,
 } from '@nestjs/common';
 import type { Request } from 'express';
-import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
+import { ApiTags, ApiBearerAuth, ApiBody } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
@@ -28,6 +28,7 @@ export class AuthController {
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   @Post('login')
   @HttpCode(HttpStatus.OK)
+  @ApiBody({ type: LoginDto })
   async login(@Body() dto: LoginDto, @Req() req: Request) {
     const data = await this.authService.login(dto, reqCtx(req));
     return { success: true, data, message: 'Login successful' };
@@ -36,6 +37,7 @@ export class AuthController {
   @Public()
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   @Post('register')
+  @ApiBody({ type: RegisterDto })
   async register(@Body() dto: RegisterDto, @Req() req: Request) {
     const data = await this.authService.register(dto, reqCtx(req));
     return { success: true, data, message: 'Registration successful' };
