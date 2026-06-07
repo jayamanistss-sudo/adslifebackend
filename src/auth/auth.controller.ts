@@ -112,6 +112,29 @@ export class AuthController {
 
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
+  @Put('location')
+  async updateLocation(
+    @CurrentUser() user: any,
+    @Body() dto: { lat: number; lng: number; city?: string; accuracy?: number; source?: string },
+  ) {
+    if (dto.lat == null || dto.lng == null) {
+      return { success: false, error: 'lat and lng are required' };
+    }
+    const lat = Number(dto.lat);
+    const lng = Number(dto.lng);
+    if (Number.isNaN(lat) || Number.isNaN(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+      return { success: false, error: 'Invalid coordinates' };
+    }
+    const data = await this.authService.updateLocation(
+      user.user_id, lat, lng, dto.city,
+      dto.accuracy == null ? undefined : Number(dto.accuracy),
+      dto.source ?? 'gps',
+    );
+    return { success: true, data };
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
   @Put('profile')
   async updateProfile(
     @CurrentUser() user: any,

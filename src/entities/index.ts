@@ -32,6 +32,7 @@ export { BannerAdRequest } from './banner-ad-request.entity';
 export { Leaderboard } from './leaderboard.entity';
 export { ShareEvent } from './share-event.entity';
 export { SpotlightRequest } from './spotlight-request.entity';
+export { UserLocation } from './user-location.entity';
 
 import { User } from './user.entity';
 import { Vendor } from './vendor.entity';
@@ -67,6 +68,7 @@ import { BannerAdRequest } from './banner-ad-request.entity';
 import { Leaderboard } from './leaderboard.entity';
 import { ShareEvent } from './share-event.entity';
 import { SpotlightRequest } from './spotlight-request.entity';
+import { UserLocation } from './user-location.entity';
 
 export const entities = [
   User,
@@ -103,4 +105,5 @@ export const entities = [
   Leaderboard,
   ShareEvent,
   SpotlightRequest,
+  UserLocation,
 ];

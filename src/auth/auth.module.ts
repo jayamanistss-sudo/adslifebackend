@@ -11,6 +11,7 @@ import { User } from '../entities/user.entity';
 import { Vendor } from '../entities/vendor.entity';
 import { UserPreference } from '../entities/user-preference.entity';
 import { PasswordReset } from '../entities/password-reset.entity';
+import { UserLocation } from '../entities/user-location.entity';
 
 @Module({
   imports: [
@@ -25,7 +26,7 @@ import { PasswordReset } from '../entities/password-reset.entity';
         },
       }),
     }),
-    TypeOrmModule.forFeature([User, Vendor, UserPreference, PasswordReset]),
+    TypeOrmModule.forFeature([User, Vendor, UserPreference, PasswordReset, UserLocation]),
     ReferralModule,
   ],
   controllers: [AuthController],

@@ -24,6 +24,7 @@ import { User } from '../entities/user.entity';
 import { Vendor } from '../entities/vendor.entity';
 import { UserPreference } from '../entities/user-preference.entity';
 import { PasswordReset } from '../entities/password-reset.entity';
+import { UserLocation } from '../entities/user-location.entity';
 
 @Injectable()
 export class AuthService {
@@ -32,6 +33,7 @@ export class AuthService {
     @InjectRepository(Vendor) private readonly vendorRepo: Repository<Vendor>,
     @InjectRepository(UserPreference) private readonly userPrefRepo: Repository<UserPreference>,
     @InjectRepository(PasswordReset) private readonly passwordResetRepo: Repository<PasswordReset>,
+    @InjectRepository(UserLocation) private readonly userLocationRepo: Repository<UserLocation>,
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
@@ -255,6 +257,14 @@ export class AuthService {
     });
     if (!user) throw new NotFoundException('User not found');
     return user;
+  }
+
+  async updateLocation(userId: number, lat: number, lng: number, city?: string, accuracy?: number, source = 'gps') {
+    await Promise.all([
+      this.userLocationRepo.save({ user_id: userId, lat, lng, city: city ?? null, accuracy: accuracy ?? null, source }),
+      this.userRepo.update(userId, { lat, lng, ...(city !== undefined && { city }) }),
+    ]);
+    return { lat, lng, city: city ?? null, accuracy: accuracy ?? null, source };
   }
 
   async changePassword(userId: number, currentPassword: string, newPassword: string) {
