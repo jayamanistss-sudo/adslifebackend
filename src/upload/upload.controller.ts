@@ -32,7 +32,7 @@ export class UploadController {
     FileInterceptor('image', {
       storage: diskStorage({
         destination: (_req, _file, cb) => {
-          const dir = join(process.cwd(), 'uploads', 'vendors');
+          const dir = join(__dirname, '..', '..', 'uploads', 'vendors');
           if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
           cb(null, dir);
         },

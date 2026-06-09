@@ -33,8 +33,9 @@ async function bootstrap() {
 
   // Serve landing page at root
   app.useStaticAssets(join(process.cwd(), 'public'));
-  // Serve uploaded vendor images
-  app.useStaticAssets(join(process.cwd(), 'uploads'), { prefix: '/uploads' });
+  // Serve uploaded vendor images — resolve from project root, not dist/
+  const projectRoot = join(__dirname, '..');
+  app.useStaticAssets(join(projectRoot, 'uploads'), { prefix: '/uploads' });
 
   // Shortcut routes for static pages (before API prefix)
   const expressApp = app.getHttpAdapter().getInstance();
