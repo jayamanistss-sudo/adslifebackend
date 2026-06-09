@@ -1,23 +1,15 @@
 import {
   Controller, Post, UseInterceptors, UploadedFile,
-  UseGuards, BadRequestException, Req,
+  UseGuards, BadRequestException,
 } from '@nestjs/common';
-import type { Request } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { diskStorage } from 'multer';
-import { join } from 'node:path';
-import { existsSync, mkdirSync } from 'node:fs';
-import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
-import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
-import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { ApiTags, ApiBearerAuth, ApiConsumes, ApiBody } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
+import { memoryStorage } from 'multer';
+import { v2 as cloudinary } from 'cloudinary';
+import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 
-const MIME_EXT: Record<string, string> = {
-  'image/jpeg': '.jpg',
-  'image/png': '.png',
-  'image/webp': '.webp',
-  'image/gif': '.gif',
-};
+const ALLOWED_MIMES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
 const MAX_SIZE = 5 * 1024 * 1024;
 
 @ApiTags('upload')
@@ -25,52 +17,58 @@ const MAX_SIZE = 5 * 1024 * 1024;
 @UseGuards(JwtAuthGuard)
 @Controller('upload')
 export class UploadController {
-  constructor(private readonly config: ConfigService) {}
+  constructor(private readonly config: ConfigService) {
+    cloudinary.config({
+      cloud_name: config.get<string>('cloudinary.cloudName'),
+      api_key:    config.get<string>('cloudinary.apiKey'),
+      api_secret: config.get<string>('cloudinary.apiSecret'),
+    });
+  }
 
   @Post('image')
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        image: { type: 'string', format: 'binary', description: 'JPEG, PNG, WebP or GIF — max 5MB' },
+      },
+      required: ['image'],
+    },
+  })
   @UseInterceptors(
     FileInterceptor('image', {
-      storage: diskStorage({
-        destination: (_req, _file, cb) => {
-          const dir = join(__dirname, '..', '..', 'uploads', 'vendors');
-          if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-          cb(null, dir);
-        },
-        filename: (_req, file, cb) => {
-          const ext = MIME_EXT[file.mimetype] ?? '.bin';
-          const unique = `v_${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`;
-          cb(null, `${unique}${ext}`);
-        },
-      }),
+      storage: memoryStorage(),
       limits: { fileSize: MAX_SIZE },
       fileFilter: (_req, file, cb) => {
-        if (!MIME_EXT[file.mimetype]) {
+        if (!ALLOWED_MIMES.has(file.mimetype)) {
           return cb(new BadRequestException('Only JPEG, PNG, WebP, GIF allowed'), false);
         }
         cb(null, true);
       },
     }),
   )
-  async uploadImage(
-    @Req() req: Request,
-    @CurrentUser() _user: any,
-    @UploadedFile() file: Express.Multer.File,
-  ) {
+  async uploadImage(@UploadedFile() file: Express.Multer.File) {
     if (!file) throw new BadRequestException('No image uploaded');
 
-    // Prefer explicit APP_URL env var to avoid leaking internal/private IPs.
-    // Fall back to the forwarded proto+host only when APP_URL is not set.
-    const configuredBase = this.config.get<string>('appUrl');
-    let baseUrl: string;
-    if (configuredBase) {
-      baseUrl = configuredBase.replace(/\/$/, '');
-    } else {
-      const proto = req.get('x-forwarded-proto') ?? req.protocol ?? 'http';
-      const host  = req.get('x-forwarded-host') ?? req.get('host') ?? 'localhost:3001';
-      baseUrl = `${proto}://${host}`;
-    }
+    const result = await new Promise<any>((resolve, reject) => {
+      const stream = cloudinary.uploader.upload_stream(
+        { folder: 'adslife/vendors', resource_type: 'image' },
+        (err, res) => (err ? reject(err) : resolve(res)),
+      );
+      stream.end(file.buffer);
+    });
 
-    const url = `${baseUrl}/uploads/vendors/${file.filename}`;
-    return { success: true, data: { url, filename: file.filename, size: file.size } };
+    return {
+      success: true,
+      data: {
+        url:       result.secure_url,
+        public_id: result.public_id,
+        width:     result.width,
+        height:    result.height,
+        size:      result.bytes,
+        format:    result.format,
+      },
+    };
   }
 }
