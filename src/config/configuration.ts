@@ -60,9 +60,8 @@ export default () => ({
     webhookUrl: process.env.MONITORING_WEBHOOK_URL || '',
   },
 
-  cloudinary: {
-    cloudName: process.env.CLOUDINARY_CLOUD_NAME || '',
-    apiKey:    process.env.CLOUDINARY_API_KEY    || '',
-    apiSecret: process.env.CLOUDINARY_API_SECRET || '',
+  upload: {
+    dir:     process.env.UPLOAD_DIR || '/var/www/uploads/adslife',
+    baseUrl: process.env.UPLOAD_BASE_URL || 'https://fileupload.adslife.in/uploads',
   },
 });

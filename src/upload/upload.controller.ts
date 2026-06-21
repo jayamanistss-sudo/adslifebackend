@@ -6,10 +6,17 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiTags, ApiBearerAuth, ApiConsumes, ApiBody } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
 import { memoryStorage } from 'multer';
-import { v2 as cloudinary } from 'cloudinary';
+import { randomUUID } from 'node:crypto';
+import { promises as fs } from 'node:fs';
+import { join } from 'node:path';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 
-const ALLOWED_MIMES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
+const ALLOWED_MIMES: Record<string, string> = {
+  'image/jpeg': 'jpg',
+  'image/png':  'png',
+  'image/webp': 'webp',
+  'image/gif':  'gif',
+};
 const MAX_SIZE = 5 * 1024 * 1024;
 
 @ApiTags('upload')
@@ -17,13 +24,7 @@ const MAX_SIZE = 5 * 1024 * 1024;
 @UseGuards(JwtAuthGuard)
 @Controller('upload')
 export class UploadController {
-  constructor(private readonly config: ConfigService) {
-    cloudinary.config({
-      cloud_name: config.get<string>('cloudinary.cloudName'),
-      api_key:    config.get<string>('cloudinary.apiKey'),
-      api_secret: config.get<string>('cloudinary.apiSecret'),
-    });
-  }
+  constructor(private readonly config: ConfigService) {}
 
   @Post('image')
   @ApiConsumes('multipart/form-data')
@@ -41,7 +42,7 @@ export class UploadController {
       storage: memoryStorage(),
       limits: { fileSize: MAX_SIZE },
       fileFilter: (_req, file, cb) => {
-        if (!ALLOWED_MIMES.has(file.mimetype)) {
+        if (!ALLOWED_MIMES[file.mimetype]) {
           return cb(new BadRequestException('Only JPEG, PNG, WebP, GIF allowed'), false);
         }
         cb(null, true);
@@ -51,29 +52,24 @@ export class UploadController {
   async uploadImage(@UploadedFile() file: Express.Multer.File) {
     if (!file) throw new BadRequestException('No image uploaded');
 
-    const b64 = `data:${file.mimetype};base64,${file.buffer.toString('base64')}`;
+    const uploadDir = this.config.get<string>('upload.dir')!;
+    const baseUrl   = this.config.get<string>('upload.baseUrl')!;
+    const ext       = ALLOWED_MIMES[file.mimetype];
+    const filename  = `${randomUUID()}.${ext}`;
 
-    let result;
     try {
-      result = await cloudinary.uploader.upload(b64, {
-        folder: 'adslife/vendors',
-        resource_type: 'image',
-        timeout: 20000,
-      });
+      await fs.mkdir(uploadDir, { recursive: true });
+      await fs.writeFile(join(uploadDir, filename), file.buffer);
     } catch (err: any) {
-      const message = err?.error?.message ?? err?.message ?? 'Image upload failed, please try again';
-      throw new InternalServerErrorException(message);
+      throw new InternalServerErrorException(err?.message ?? 'Image upload failed, please try again');
     }
 
     return {
       success: true,
       data: {
-        url:       result.secure_url,
-        public_id: result.public_id,
-        width:     result.width,
-        height:    result.height,
-        size:      result.bytes,
-        format:    result.format,
+        url:    `${baseUrl}/${filename}`,
+        size:   file.size,
+        format: ext,
       },
     };
   }
