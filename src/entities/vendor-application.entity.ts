@@ -37,6 +37,18 @@ export class VendorApplication {
   @Column({ type: 'text', nullable: true })
   description: string | null;
 
+  @Column({ type: 'numeric', precision: 10, scale: 7, nullable: true })
+  lat: number | null;
+
+  @Column({ type: 'numeric', precision: 10, scale: 7, nullable: true })
+  lng: number | null;
+
+  @Column({ type: 'text', nullable: true })
+  logo_url: string | null;
+
+  @Column({ type: 'int', nullable: true })
+  plan_id: number | null;
+
   @Column({ type: 'varchar', length: 20, default: 'pending' })
   status: string;
 

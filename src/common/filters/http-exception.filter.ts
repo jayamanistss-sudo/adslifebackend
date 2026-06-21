@@ -27,6 +27,8 @@ export class HttpExceptionFilter implements ExceptionFilter {
           : exception.message;
     } else if (exception instanceof Error) {
       console.error('[UnhandledException]', exception.message, exception.stack);
+    } else {
+      console.error('[UnhandledException:NonError]', JSON.stringify(exception));
     }
 
     if (status >= 500) {

@@ -1,6 +1,6 @@
 import {
   Controller, Post, UseInterceptors, UploadedFile,
-  UseGuards, BadRequestException,
+  UseGuards, BadRequestException, InternalServerErrorException,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiTags, ApiBearerAuth, ApiConsumes, ApiBody } from '@nestjs/swagger';
@@ -52,10 +52,18 @@ export class UploadController {
     if (!file) throw new BadRequestException('No image uploaded');
 
     const b64 = `data:${file.mimetype};base64,${file.buffer.toString('base64')}`;
-    const result = await cloudinary.uploader.upload(b64, {
-      folder: 'adslife/vendors',
-      resource_type: 'image',
-    });
+
+    let result;
+    try {
+      result = await cloudinary.uploader.upload(b64, {
+        folder: 'adslife/vendors',
+        resource_type: 'image',
+        timeout: 20000,
+      });
+    } catch (err: any) {
+      const message = err?.error?.message ?? err?.message ?? 'Image upload failed, please try again';
+      throw new InternalServerErrorException(message);
+    }
 
     return {
       success: true,
