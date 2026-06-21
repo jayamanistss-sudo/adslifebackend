@@ -33,6 +33,9 @@ export { Leaderboard } from './leaderboard.entity';
 export { ShareEvent } from './share-event.entity';
 export { SpotlightRequest } from './spotlight-request.entity';
 export { UserLocation } from './user-location.entity';
+export { NotificationTemplate } from './notification-template.entity';
+export { OfferReview } from './offer-review.entity';
+export { OfferReport, OfferReportReason } from './offer-report.entity';
 
 import { User } from './user.entity';
 import { Vendor } from './vendor.entity';
@@ -69,6 +72,9 @@ import { Leaderboard } from './leaderboard.entity';
 import { ShareEvent } from './share-event.entity';
 import { SpotlightRequest } from './spotlight-request.entity';
 import { UserLocation } from './user-location.entity';
+import { NotificationTemplate } from './notification-template.entity';
+import { OfferReview } from './offer-review.entity';
+import { OfferReport } from './offer-report.entity';
 
 export const entities = [
   User,
@@ -106,4 +112,7 @@ export const entities = [
   ShareEvent,
   SpotlightRequest,
   UserLocation,
+  NotificationTemplate,
+  OfferReview,
+  OfferReport,
 ];

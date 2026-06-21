@@ -5,7 +5,7 @@ import { DataSource, Repository } from 'typeorm';
 import { Offer } from '../entities/offer.entity';
 import { UserPreference } from '../entities/user-preference.entity';
 import { SavedOffer } from '../entities/saved-offer.entity';
-import { UserInteraction } from '../entities/user-interaction.entity';
+import { UserInteraction, InteractionAction } from '../entities/user-interaction.entity';
 import { Vendor } from '../entities/vendor.entity';
 
 @Injectable()
@@ -127,6 +127,12 @@ export class FeedService {
       .offset(offset)
       .getRawMany();
 
+    if (userId && search) {
+      this.userInteractionRepo
+        .insert({ user_id: userId, offer_id: null, action: InteractionAction.SEARCH, search_term: search })
+        .catch(() => {});
+    }
+
     return { offers, total: +total };
   }
 
@@ -142,13 +148,19 @@ export class FeedService {
          ))))::numeric, 1)`
       : 'NULL';
 
+    const popularityScore = `o.views + o.clicks * 2 + o.saves * 3`;
+
     const qb = this.dataSource
       .createQueryBuilder()
       .select('o.*')
       .addSelect('v.business_name', 'business_name')
       .addSelect('v.logo_url', 'vendor_logo')
       .addSelect('v.city', 'vendor_city')
+      .addSelect('v.address', 'vendor_address')
+      .addSelect('v.phone', 'vendor_phone')
+      .addSelect('v.website', 'vendor_website')
       .addSelect(distExpr, 'distance')
+      .addSelect(popularityScore, 'popularity')
       .from(Offer, 'o')
       .innerJoin(Vendor, 'v', 'v.id = o.vendor_id')
       .where('o.is_active = true')
@@ -156,11 +168,11 @@ export class FeedService {
       .andWhere("v.status = 'approved'");
 
     if (city) {
-      qb.andWhere('(v.city = :city OR o.category IS NOT NULL)', { city });
+      qb.andWhere('(v.city ILIKE :city OR o.category IS NOT NULL)', { city });
     }
     if (search) {
       const s = `%${search}%`;
-      qb.andWhere('(o.title LIKE :s1 OR v.business_name LIKE :s2 OR o.category LIKE :s3)', { s1: s, s2: s, s3: s });
+      qb.andWhere('(o.title ILIKE :s1 OR v.business_name ILIKE :s2 OR o.category ILIKE :s3)', { s1: s, s2: s, s3: s });
     }
 
     const countQb = this.dataSource
@@ -173,17 +185,18 @@ export class FeedService {
       .andWhere("v.status = 'approved'");
 
     if (city) {
-      countQb.andWhere('(v.city = :city OR o.category IS NOT NULL)', { city });
+      countQb.andWhere('(v.city ILIKE :city OR o.category IS NOT NULL)', { city });
     }
     if (search) {
       const s = `%${search}%`;
-      countQb.andWhere('(o.title LIKE :s1 OR v.business_name LIKE :s2 OR o.category LIKE :s3)', { s1: s, s2: s, s3: s });
+      countQb.andWhere('(o.title ILIKE :s1 OR v.business_name ILIKE :s2 OR o.category ILIKE :s3)', { s1: s, s2: s, s3: s });
     }
 
-    const { total } = await countQb.getRawOne();
+    const countRow = await countQb.getRawOne();
+    const total = countRow?.total ?? 0;
 
     const offers = await qb
-      .orderBy('(o.views + o.clicks * 2 + o.saves * 3)', 'DESC')
+      .orderBy('popularity', 'DESC')
       .addOrderBy('o.created_at', 'DESC')
       .limit(limit)
       .offset(offset)

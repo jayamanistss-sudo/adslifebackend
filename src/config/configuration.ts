@@ -52,6 +52,10 @@ export default () => ({
   mymemoryApi: 'https://api.mymemory.translated.net/get',
   nominatimApi: 'https://nominatim.openstreetmap.org',
 
+  gemini: {
+    apiKey: process.env.GEMINI_API_KEY || '',
+  },
+
   monitoring: {
     webhookUrl: process.env.MONITORING_WEBHOOK_URL || '',
   },

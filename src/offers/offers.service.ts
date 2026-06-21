@@ -12,6 +12,7 @@ import { NotificationsGateway } from '../gateway/notifications.gateway';
 import { Offer } from '../entities/offer.entity';
 import { Vendor } from '../entities/vendor.entity';
 import { VendorFollower } from '../entities/vendor-follower.entity';
+import { OfferReviewsService } from './offer-reviews.service';
 
 @Injectable()
 export class OffersService {
@@ -21,6 +22,7 @@ export class OffersService {
     @InjectRepository(VendorFollower) private readonly vendorFollowerRepo: Repository<VendorFollower>,
     private readonly push: PushService,
     private readonly gateway: NotificationsGateway,
+    private readonly offerReviewsService: OfferReviewsService,
   ) {}
 
   private async getVendorId(userId: number): Promise<number> {
@@ -132,7 +134,7 @@ export class OffersService {
     return { deleted: true };
   }
 
-  async detail(offerId: number, role?: string) {
+  async detail(offerId: number, role?: string, userId?: number) {
     const qb = this.offerRepo
       .createQueryBuilder('o')
       .innerJoin('vendors', 'v', 'v.id = o.vendor_id')
@@ -177,6 +179,10 @@ export class OffersService {
     const offer = await qb.getRawOne();
     if (!offer) throw new NotFoundException('Offer not found');
     const toNum = (v: any) => (v == null ? null : Number.parseFloat(v));
+
+    const { avgRating, reviewCount } = await this.offerReviewsService.getAggregate(offerId);
+    const myReview = userId ? await this.offerReviewsService.getMine(offerId, userId) : null;
+
     return {
       ...offer,
       discountPercent: toNum(offer.discountPercent),
@@ -184,6 +190,9 @@ export class OffersService {
       offerPrice:      toNum(offer.offerPrice),
       vendorLat:       toNum(offer.vendorLat),
       vendorLng:       toNum(offer.vendorLng),
+      avgRating,
+      reviewCount,
+      myReview: myReview ? { rating: myReview.rating, comment: myReview.comment } : null,
     };
   }
 

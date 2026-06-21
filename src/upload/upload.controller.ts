@@ -51,12 +51,10 @@ export class UploadController {
   async uploadImage(@UploadedFile() file: Express.Multer.File) {
     if (!file) throw new BadRequestException('No image uploaded');
 
-    const result = await new Promise<any>((resolve, reject) => {
-      const stream = cloudinary.uploader.upload_stream(
-        { folder: 'adslife/vendors', resource_type: 'image' },
-        (err, res) => (err ? reject(err) : resolve(res)),
-      );
-      stream.end(file.buffer);
+    const b64 = `data:${file.mimetype};base64,${file.buffer.toString('base64')}`;
+    const result = await cloudinary.uploader.upload(b64, {
+      folder: 'adslife/vendors',
+      resource_type: 'image',
     });
 
     return {

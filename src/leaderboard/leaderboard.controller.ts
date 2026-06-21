@@ -26,11 +26,13 @@ export class LeaderboardController {
     const qb = this.leaderboardRepo
       .createQueryBuilder('l')
       .innerJoin(User, 'u', 'l.user_id = u.id')
-      .select([
-        'l.id', 'l.user_id', 'l.period', 'l.score', 'l.city',
-        'u.name', 'u.avatar_url',
-      ])
-      .addSelect('u.city', 'user_city')
+      .select('l.id', 'id')
+      .addSelect('l.user_id', 'user_id')
+      .addSelect('l.period', 'period')
+      .addSelect('l.score', 'score')
+      .addSelect('u.name', 'name')
+      .addSelect('u.avatar_url', 'avatar_url')
+      .addSelect('COALESCE(u.city, l.city)', 'city')
       .where('l.period = :period', { period })
       .orderBy('l.score', 'DESC')
       .limit(limit);
