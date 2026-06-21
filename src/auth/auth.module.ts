@@ -7,6 +7,7 @@ import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { ReferralModule } from '../referral/referral.module';
+import { MailModule } from '../mail/mail.module';
 import { User } from '../entities/user.entity';
 import { Vendor } from '../entities/vendor.entity';
 import { UserPreference } from '../entities/user-preference.entity';
@@ -28,6 +29,7 @@ import { UserLocation } from '../entities/user-location.entity';
     }),
     TypeOrmModule.forFeature([User, Vendor, UserPreference, PasswordReset, UserLocation]),
     ReferralModule,
+    MailModule,
   ],
   controllers: [AuthController],
   providers: [AuthService, JwtStrategy],

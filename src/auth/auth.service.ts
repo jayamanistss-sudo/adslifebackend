@@ -20,6 +20,7 @@ import { RegisterDto } from './dto/register.dto';
 import { BecomeVendorDto } from './dto/google-auth.dto';
 import { ReferralService } from '../referral/referral.service';
 import { MonitoringService } from '../monitoring/monitoring.service';
+import { MailService } from '../mail/mail.service';
 import { User } from '../entities/user.entity';
 import { Vendor } from '../entities/vendor.entity';
 import { UserPreference } from '../entities/user-preference.entity';
@@ -39,6 +40,7 @@ export class AuthService {
     private readonly config: ConfigService,
     private readonly referral: ReferralService,
     private readonly monitoring: MonitoringService,
+    private readonly mail: MailService,
   ) {}
 
   async login(dto: LoginDto, ctx?: { ip: string; ua: string; requestId?: string }) {
@@ -126,6 +128,8 @@ export class AuthService {
       action: 'register', ipAddress: ctx?.ip ?? '0.0.0.0', userAgent: ctx?.ua,
     }).catch(() => {}));
 
+    setImmediate(() => this.mail.sendWelcomeEmail(dto.email.trim(), dto.name.trim()));
+
     const token = this.generateToken(userId, role);
     return { user: { id: userId, name: dto.name, email: dto.email, role }, token };
   }
@@ -176,6 +180,8 @@ export class AuthService {
         .values({ user_id: userId, preferred_categories: '[]' as any, preferred_vendors: '[]' as any })
         .orIgnore()
         .execute();
+
+      setImmediate(() => this.mail.sendWelcomeEmail(profile.email, profile.name || profile.email));
     }
 
     const token = this.generateToken(userId, role);

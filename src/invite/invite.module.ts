@@ -4,9 +4,10 @@ import { InviteController } from './invite.controller';
 import { InviteService } from './invite.service';
 import { User } from '../entities/user.entity';
 import { Offer } from '../entities/offer.entity';
+import { MailModule } from '../mail/mail.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([User, Offer])],
+  imports: [TypeOrmModule.forFeature([User, Offer]), MailModule],
   controllers: [InviteController],
   providers: [InviteService],
 })

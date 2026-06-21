@@ -1,25 +1,17 @@
 import { Injectable, InternalServerErrorException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import * as nodemailer from 'nodemailer';
 import { User } from '../entities/user.entity';
 import { Offer } from '../entities/offer.entity';
 import { Vendor } from '../entities/vendor.entity';
+import { MailService } from '../mail/mail.service';
 
 @Injectable()
 export class InviteService {
-  private readonly transporter = process.env.SMTP_USER && process.env.SMTP_PASS
-    ? nodemailer.createTransport({
-        host: process.env.SMTP_HOST || 'smtp.gmail.com',
-        port: Number(process.env.SMTP_PORT) || 587,
-        secure: false,
-        auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
-      })
-    : null;
-
   constructor(
     @InjectRepository(User) private readonly userRepo: Repository<User>,
     @InjectRepository(Offer) private readonly offerRepo: Repository<Offer>,
+    private readonly mail: MailService,
   ) {}
 
   private escapeHtml(text: string): string {
@@ -77,19 +69,9 @@ export class InviteService {
         </div>
       </div>`;
 
-    if (!this.transporter) {
-      console.log(`[Invite] Would send to ${toEmail} from ${sender.name} (SMTP not configured)`);
-      return;
-    }
-
     try {
-      await this.transporter.sendMail({
-        from: `"AdsLife" <${process.env.SMTP_USER}>`,
-        to: toEmail,
-        subject: `${sender.name} invited you to AdsLife 🎉`,
-        html,
-      });
-    } catch (err) {
+      await this.mail.send(toEmail, `${sender.name} invited you to AdsLife 🎉`, html);
+    } catch (err: any) {
       console.error('[Invite] Email send failed:', err.message);
       throw new InternalServerErrorException('Failed to send invite email');
     }
