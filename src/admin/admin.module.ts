@@ -15,6 +15,7 @@ import { FraudFlag } from '../entities/fraud-flag.entity';
 import { Payment } from '../entities/payment.entity';
 import { UserFcmToken } from '../entities/user-fcm-token.entity';
 import { Notification } from '../entities/notification.entity';
+import { MailModule } from '../mail/mail.module';
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { Notification } from '../entities/notification.entity';
       VendorApplication, SubscriptionPlan, FraudFlag, Payment,
       UserFcmToken, Notification,
     ]),
+    MailModule,
   ],
   controllers: [AdminController],
   providers: [AdminService, PushService],

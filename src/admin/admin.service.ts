@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { PushService } from '../services/push.service';
+import { MailService } from '../mail/mail.service';
 import { MonitoringService } from '../monitoring/monitoring.service';
 import { User, UserRole } from '../entities/user.entity';
 import { Vendor, VendorStatus } from '../entities/vendor.entity';
@@ -30,6 +31,7 @@ export class AdminService {
     @InjectRepository(Payment) private readonly paymentRepo: Repository<Payment>,
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly push: PushService,
+    private readonly mail: MailService,
     private readonly monitoring: MonitoringService,
   ) {}
 
@@ -181,8 +183,14 @@ export class AdminService {
       }
     });
 
+    const user = await this.userRepo.findOne({ where: { id: app.user_id }, select: ['id', 'name', 'email'] });
+
     if (status === 'approved') {
-      await this.push.send(app.user_id, 'Vendor Approved!', 'Your vendor account has been approved.', { type: 'vendor_approved' });
+      await this.push.send(app.user_id, 'Vendor Approved!', 'Your vendor account has been approved. Start adding offers now!', { type: 'vendor_approved' });
+      if (user?.email) await this.mail.sendVendorApprovedEmail(user.email, user.name, app.business_name);
+    } else {
+      await this.push.send(app.user_id, 'Vendor Application Update', note || 'Your vendor application was not approved this time.', { type: 'vendor_rejected' });
+      if (user?.email) await this.mail.sendVendorRejectedEmail(user.email, user.name, app.business_name, note);
     }
 
     return { updated: true };

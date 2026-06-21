@@ -1,4 +1,4 @@
-import { Controller, Post, Body, UseGuards } from '@nestjs/common';
+import { Controller, Post, Get, Body, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -15,6 +15,24 @@ export class VendorApplyController {
   constructor(
     @InjectRepository(VendorApplication) private readonly applicationRepo: Repository<VendorApplication>,
   ) {}
+
+  @Get('status')
+  async status(@CurrentUser() user: any) {
+    const latest = await this.applicationRepo.findOne({
+      where: { user_id: user.user_id },
+      order: { created_at: 'DESC' },
+    });
+    if (!latest) return { success: true, data: null };
+    return {
+      success: true,
+      data: {
+        id: latest.id,
+        status: latest.status,
+        business_name: latest.business_name,
+        created_at: latest.created_at,
+      },
+    };
+  }
 
   @Post('submit')
   async submit(@CurrentUser() user: any, @Body() dto: SubmitVendorApplicationDto) {

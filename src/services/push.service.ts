@@ -59,34 +59,38 @@ export class PushService {
   }
 
   async send(userIds: number | number[], title: string, body: string, data: Record<string, string> = {}): Promise<number> {
+    const ids = Array.isArray(userIds) ? userIds : [userIds];
+    if (!ids.length) return 0;
+
+    // The in-app notification (bell icon / notifications list) must not
+    // depend on FCM succeeding — users without a registered push token, or
+    // any time the FCM/OAuth pipeline is down, should still see it in-app.
+    const offerId = data.offer_id ? +data.offer_id : null;
+    await this.notifRepo.insert(
+      ids.map((uid) => ({
+        user_id: uid,
+        title,
+        body,
+        type: data.type ?? 'push',
+        offer_id: offerId,
+        is_read: false,
+      })),
+    );
+
     const sa = this.getServiceAccount();
     if (!sa?.project_id) {
-      this.logger.warn('send(): no firebase-service-account.json found, skipping');
+      this.logger.warn('send(): no firebase-service-account.json found, skipping FCM push');
       return 0;
     }
 
     const accessToken = await this.getAccessToken(sa);
     if (!accessToken) {
-      this.logger.warn('send(): could not obtain FCM access token, skipping');
+      this.logger.warn('send(): could not obtain FCM access token, skipping FCM push');
       return 0;
     }
 
-    const ids = Array.isArray(userIds) ? userIds : [userIds];
-    if (!ids.length) return 0;
-
     const tokens = await this.userFcmTokenRepo.find({ where: { user_id: In(ids) } });
     if (!tokens.length) return 0;
-
-    const tokenMap: Record<string, number> = {};
-    for (const t of tokens) tokenMap[t.token] = t.user_id;
-
-    // Decide upfront which single token "represents" each user for logging
-    // purposes — avoids a race where two concurrent sends for the same user's
-    // multiple devices both pass a check-then-act and double-insert.
-    const representativeToken = new Map<number, string>();
-    for (const t of tokens) {
-      if (!representativeToken.has(t.user_id)) representativeToken.set(t.user_id, t.token);
-    }
 
     const url = `https://fcm.googleapis.com/v1/projects/${sa.project_id}/messages:send`;
     const CONCURRENCY = 20;
@@ -105,23 +109,7 @@ export class PushService {
           },
         }, { headers: { Authorization: `Bearer ${accessToken}` } });
 
-        if (resp.data?.name) {
-          sent++;
-          const uid = tokenMap[token];
-          const offerId = data.offer_id ? +data.offer_id : null;
-          // One log row per user per send() call, regardless of how many of
-          // their devices/tokens received it — keeps the daily cap meaningful.
-          if (uid && representativeToken.get(uid) === token) {
-            await this.notifRepo.save({
-              user_id: uid,
-              title,
-              body,
-              type: data.type ?? 'push',
-              offer_id: offerId,
-              is_read: false,
-            });
-          }
-        }
+        if (resp.data?.name) sent++;
       } catch (e: any) {
         if (e.response?.data?.error?.details?.some((d: any) => d.errorCode === 'UNREGISTERED')) {
           stale.push(token);
