@@ -171,8 +171,8 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @Get('powersync-token')
-  getPowerSyncToken(@CurrentUser() user: any) {
-    const data = this.authService.generatePowerSyncToken(user.user_id);
+  async getPowerSyncToken(@CurrentUser() user: any) {
+    const data = await this.authService.generatePowerSyncToken(user.user_id);
     return { success: true, data };
   }
 

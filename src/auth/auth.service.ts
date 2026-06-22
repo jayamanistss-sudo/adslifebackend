@@ -320,7 +320,7 @@ export class AuthService {
     );
   }
 
-  generatePowerSyncToken(userId: number): { token: string; powersync_url: string } {
+  async generatePowerSyncToken(userId: number): Promise<{ token: string; powersync_url: string }> {
     const secret = this.config.get<string>('powersync.secret');
     const kid = this.config.get<string>('powersync.kid') ?? 'adslife-key-1';
     const powersyncUrl = this.config.get<string>('powersync.url');
@@ -329,10 +329,15 @@ export class AuthService {
       throw new BadRequestException('PowerSync is not configured');
     }
 
+    // Look up the role fresh from the DB rather than trusting the login JWT's
+    // (possibly stale, up to 24h old) role claim — a recently-approved vendor
+    // or promoted admin must get correct sync access immediately.
+    const user = await this.userRepo.findOne({ where: { id: userId }, select: ['role'] });
+
     const secretBuffer = Buffer.from(secret, 'base64');
 
     const token = jwt.sign(
-      { sub: String(userId) },
+      { sub: String(userId), role: user?.role ?? 'user' },
       secretBuffer,
       {
         algorithm: 'HS256',

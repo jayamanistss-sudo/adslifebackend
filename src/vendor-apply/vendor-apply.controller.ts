@@ -5,6 +5,8 @@ import { Repository } from 'typeorm';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { VendorApplication } from '../entities/vendor-application.entity';
+import { User, UserRole } from '../entities/user.entity';
+import { PushService } from '../services/push.service';
 import { SubmitVendorApplicationDto } from './dto/vendor-apply.dto';
 
 @ApiTags('vendor-apply')
@@ -14,6 +16,8 @@ import { SubmitVendorApplicationDto } from './dto/vendor-apply.dto';
 export class VendorApplyController {
   constructor(
     @InjectRepository(VendorApplication) private readonly applicationRepo: Repository<VendorApplication>,
+    @InjectRepository(User) private readonly userRepo: Repository<User>,
+    private readonly push: PushService,
   ) {}
 
   @Get('status')
@@ -59,6 +63,17 @@ export class VendorApplyController {
       logo_url: dto.logo_url ?? null,
       status: 'pending',
     });
+
+    const admins = await this.userRepo.find({ where: { role: UserRole.ADMIN }, select: ['id'] });
+    if (admins.length) {
+      await this.push.send(
+        admins.map((a) => a.id),
+        'New Vendor Application',
+        `${dto.business_name} applied to become a vendor — review it now.`,
+        { type: 'vendor_application_new', application_id: String(application.id) },
+      );
+    }
+
     return {
       success: true,
       data: { id: application.id, status: 'pending', message: 'Application submitted for review' },
