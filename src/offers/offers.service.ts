@@ -12,6 +12,7 @@ import { NotificationsGateway } from '../gateway/notifications.gateway';
 import { Offer } from '../entities/offer.entity';
 import { Vendor } from '../entities/vendor.entity';
 import { VendorFollower } from '../entities/vendor-follower.entity';
+import { SubscriptionPlan } from '../entities/subscription-plan.entity';
 import { OfferReviewsService } from './offer-reviews.service';
 
 @Injectable()
@@ -20,6 +21,7 @@ export class OffersService {
     @InjectRepository(Offer) private readonly offerRepo: Repository<Offer>,
     @InjectRepository(Vendor) private readonly vendorRepo: Repository<Vendor>,
     @InjectRepository(VendorFollower) private readonly vendorFollowerRepo: Repository<VendorFollower>,
+    @InjectRepository(SubscriptionPlan) private readonly planRepo: Repository<SubscriptionPlan>,
     private readonly push: PushService,
     private readonly gateway: NotificationsGateway,
     private readonly offerReviewsService: OfferReviewsService,
@@ -31,9 +33,23 @@ export class OffersService {
     return vendor.id;
   }
 
+  private async assertUnderOfferLimit(vendorId: number): Promise<void> {
+    const vendor = await this.vendorRepo.findOne({ where: { id: vendorId }, select: ['subscription_plan'] });
+    const plan = await this.planRepo.findOne({ where: { slug: vendor?.subscription_plan ?? 'free' }, select: ['max_offers', 'name'] });
+    if (!plan || plan.max_offers === null) return; // no plan row or unlimited — nothing to enforce
+
+    const activeCount = await this.offerRepo.count({ where: { vendor_id: vendorId, is_active: true } });
+    if (activeCount >= plan.max_offers) {
+      throw new ForbiddenException(
+        `Your ${plan.name} plan allows up to ${plan.max_offers} active offer${plan.max_offers === 1 ? '' : 's'}. Upgrade your plan or deactivate an existing offer to add more.`,
+      );
+    }
+  }
+
   async create(userId: number, dto: CreateOfferDto) {
     const vendorId = await this.getVendorId(userId);
     if (!dto.title?.trim()) throw new BadRequestException('Title is required');
+    await this.assertUnderOfferLimit(vendorId);
 
     const validFrom = dto.valid_from ? new Date(dto.valid_from + 'T00:00:00') : null;
     const validUntil = dto.valid_until ? new Date(dto.valid_until + 'T23:59:59') : null;
@@ -97,6 +113,12 @@ export class OffersService {
     if (role !== 'admin') {
       const vendorId = await this.getVendorId(userId);
       if (offer.vendor_id !== vendorId) throw new ForbiddenException('Access denied');
+    }
+
+    // Re-activating a previously deactivated offer must respect the plan
+    // limit too, not just creating a brand new one.
+    if (dto.is_active === true && !offer.is_active) {
+      await this.assertUnderOfferLimit(offer.vendor_id);
     }
 
     const trimOrNull = (v: string | undefined) => (v?.trim() || null);

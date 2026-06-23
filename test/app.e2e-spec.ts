@@ -125,6 +125,78 @@ describe('AdsLife API (e2e)', () => {
     });
   });
 
+  describe('Subscription plan offer limit', () => {
+    let vendorToken: string;
+    let vendorId: number;
+    let maxOffers: number;
+
+    beforeAll(async () => {
+      // Fast-track this disposable user straight to an approved 'free'-plan
+      // vendor via direct DB writes — exercising the full apply→approve
+      // flow isn't the point of this test, only the offer-limit enforcement.
+      const userRow = await dataSource.query('SELECT id FROM users WHERE email = $1', [testEmail]);
+      const userId = userRow[0].id;
+      await dataSource.query("UPDATE users SET role = 'vendor' WHERE id = $1", [userId]);
+      const vendorRow = await dataSource.query(
+        `INSERT INTO vendors (user_id, business_name, status, subscription_plan)
+         VALUES ($1, 'E2E Limit Shop', 'approved', 'free') RETURNING id`,
+        [userId],
+      );
+      vendorId = vendorRow[0].id;
+
+      const plan = await dataSource.query("SELECT max_offers FROM subscription_plans WHERE slug = 'free'");
+      maxOffers = plan[0].max_offers;
+
+      // Fresh login so the JWT's role claim reflects the 'vendor' role just set.
+      const loginRes = await request(app.getHttpServer())
+        .post('/api/auth/login')
+        .send({ email: testEmail, password: 'Test12345!' })
+        .expect(200);
+      vendorToken = loginRes.body.data.token;
+    });
+
+    afterAll(async () => {
+      await dataSource.query('DELETE FROM offers WHERE vendor_id = $1', [vendorId]);
+      await dataSource.query('DELETE FROM vendors WHERE id = $1', [vendorId]);
+    });
+
+    it("allows creating up to the free plan's offer limit", async () => {
+      for (let i = 0; i < maxOffers; i++) {
+        await request(app.getHttpServer())
+          .post('/api/offers')
+          .set('Authorization', `Bearer ${vendorToken}`)
+          .send({ title: `E2E Offer ${i + 1}` })
+          .expect(201);
+      }
+    });
+
+    it('rejects creating one more offer past the plan limit', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/api/offers')
+        .set('Authorization', `Bearer ${vendorToken}`)
+        .send({ title: 'E2E Offer Over Limit' })
+        .expect(403);
+
+      expect(res.body.success).toBe(false);
+      expect(res.body.error).toMatch(/plan allows up to/i);
+    });
+
+    it('frees up a slot after deactivating an offer', async () => {
+      const offers = await dataSource.query('SELECT id FROM offers WHERE vendor_id = $1 LIMIT 1', [vendorId]);
+      await request(app.getHttpServer())
+        .put(`/api/offers/${offers[0].id}`)
+        .set('Authorization', `Bearer ${vendorToken}`)
+        .send({ title: 'E2E Offer 1', is_active: 0 })
+        .expect(200);
+
+      await request(app.getHttpServer())
+        .post('/api/offers')
+        .set('Authorization', `Bearer ${vendorToken}`)
+        .send({ title: 'E2E Offer Replacement' })
+        .expect(201);
+    });
+  });
+
   describe('Image upload validation', () => {
     it('rejects a disallowed mimetype', async () => {
       const res = await request(app.getHttpServer())
