@@ -36,6 +36,7 @@ export { UserLocation } from './user-location.entity';
 export { NotificationTemplate } from './notification-template.entity';
 export { OfferReview } from './offer-review.entity';
 export { OfferReport, OfferReportReason } from './offer-report.entity';
+export { NotificationOutbox, NotificationOutboxStatus } from './notification-outbox.entity';
 
 import { User } from './user.entity';
 import { Vendor } from './vendor.entity';
@@ -75,6 +76,7 @@ import { UserLocation } from './user-location.entity';
 import { NotificationTemplate } from './notification-template.entity';
 import { OfferReview } from './offer-review.entity';
 import { OfferReport } from './offer-report.entity';
+import { NotificationOutbox } from './notification-outbox.entity';
 
 export const entities = [
   User,
@@ -115,4 +117,5 @@ export const entities = [
   NotificationTemplate,
   OfferReview,
   OfferReport,
+  NotificationOutbox,
 ];
