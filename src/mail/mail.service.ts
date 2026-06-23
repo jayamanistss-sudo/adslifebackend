@@ -63,6 +63,8 @@ export class MailService {
 
   async sendVendorApprovedEmail(toEmail: string, name: string, businessName: string): Promise<void> {
     const appUrl = process.env.APP_URL || 'https://adslife.in';
+    const loginUrl = `${appUrl}/login`;
+    const dashboardUrl = `${appUrl}/vendor/dashboard`;
     const html = `
       <div style="font-family:sans-serif;max-width:520px;margin:0 auto;padding:24px;background:#f9f9f9;">
         <div style="background:#FF6200;padding:20px 24px;border-radius:12px 12px 0 0;text-align:center;">
@@ -72,12 +74,50 @@ export class MailService {
         <div style="background:#fff;padding:24px;border-radius:0 0 12px 12px;border:1px solid #eee;">
           <p style="font-size:16px;color:#333;">Congratulations, <strong>${name}</strong> 🎉</p>
           <p style="color:#555;font-size:14px;line-height:1.6;">
-            <strong>${businessName}</strong> has been approved as a vendor on AdsLife. You can now post
+            <strong>${businessName}</strong> has been approved as a vendor on AdsLife! You can now post
             offers, track analytics, and reach customers near your shop.
           </p>
-          <a href="${appUrl}/profile" style="display:block;text-align:center;background:#FF6200;color:#fff;padding:14px;border-radius:10px;text-decoration:none;font-size:16px;font-weight:600;margin:20px 0;">
-            Go to Vendor Dashboard
+
+          <div style="background:#fff8f4;border:1px solid #ffe0cc;border-radius:10px;padding:18px 20px;margin:20px 0;">
+            <p style="color:#333;font-size:14px;font-weight:600;margin:0 0 12px;">How to get started:</p>
+            <table style="width:100%;border-collapse:collapse;">
+              <tr>
+                <td style="width:28px;vertical-align:top;padding:4px 0;">
+                  <span style="display:inline-block;background:#FF6200;color:#fff;border-radius:50%;width:20px;height:20px;text-align:center;font-size:12px;line-height:20px;font-weight:700;">1</span>
+                </td>
+                <td style="padding:4px 0 4px 10px;color:#555;font-size:13px;line-height:1.6;">
+                  Open the AdsLife app or visit
+                  <a href="${loginUrl}" style="color:#FF6200;text-decoration:none;font-weight:600;">dev.adslife.in</a>
+                </td>
+              </tr>
+              <tr>
+                <td style="width:28px;vertical-align:top;padding:4px 0;">
+                  <span style="display:inline-block;background:#FF6200;color:#fff;border-radius:50%;width:20px;height:20px;text-align:center;font-size:12px;line-height:20px;font-weight:700;">2</span>
+                </td>
+                <td style="padding:4px 0 4px 10px;color:#555;font-size:13px;line-height:1.6;">
+                  Log in with your registered email &amp; password
+                  <span style="display:block;color:#999;font-size:12px;">(${toEmail})</span>
+                </td>
+              </tr>
+              <tr>
+                <td style="width:28px;vertical-align:top;padding:4px 0;">
+                  <span style="display:inline-block;background:#FF6200;color:#fff;border-radius:50%;width:20px;height:20px;text-align:center;font-size:12px;line-height:20px;font-weight:700;">3</span>
+                </td>
+                <td style="padding:4px 0 4px 10px;color:#555;font-size:13px;line-height:1.6;">
+                  Tap the <strong>Vendor Dashboard</strong> from your profile to start adding offers
+                </td>
+              </tr>
+            </table>
+          </div>
+
+          <a href="${loginUrl}" style="display:block;text-align:center;background:#FF6200;color:#fff;padding:14px;border-radius:10px;text-decoration:none;font-size:16px;font-weight:600;margin:20px 0;">
+            Log In &amp; Go to Vendor Dashboard
           </a>
+
+          <p style="color:#888;font-size:12px;line-height:1.6;border-top:1px solid #eee;padding-top:14px;margin-top:4px;">
+            Direct link to your dashboard:
+            <a href="${dashboardUrl}" style="color:#FF6200;word-break:break-all;">${dashboardUrl}</a>
+          </p>
           <p style="color:#aaa;font-size:11px;text-align:center;">
             Questions? Just reply to this email — we're happy to help.
           </p>
