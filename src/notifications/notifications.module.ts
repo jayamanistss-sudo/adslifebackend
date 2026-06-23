@@ -7,19 +7,24 @@ import { PersonalizedNotificationService } from './personalized-notification.ser
 import { NotificationTemplateService } from './notification-template.service';
 import { NotificationCapService } from './notification-cap.service';
 import { GeminiTemplateService } from './gemini-template.service';
+import { PushOutboxService } from './push-outbox.service';
 import { PushService } from '../services/push.service';
 import { Notification } from '../entities/notification.entity';
 import { UserFcmToken } from '../entities/user-fcm-token.entity';
 import { User } from '../entities/user.entity';
 import { UserInteraction } from '../entities/user-interaction.entity';
 import { NotificationTemplate } from '../entities/notification-template.entity';
+import { NotificationOutbox } from '../entities/notification-outbox.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Notification, UserFcmToken, User, UserInteraction, NotificationTemplate])],
+  imports: [TypeOrmModule.forFeature([
+    Notification, UserFcmToken, User, UserInteraction, NotificationTemplate, NotificationOutbox,
+  ])],
   controllers: [NotificationsController],
   providers: [
     NotificationsService,
     PushService,
+    PushOutboxService,
     PromoNotificationService,
     PersonalizedNotificationService,
     NotificationTemplateService,

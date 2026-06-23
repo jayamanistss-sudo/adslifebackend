@@ -10,10 +10,15 @@ import { ErrorLog } from '../entities/error-log.entity';
 import { SecurityEvent } from '../entities/security-event.entity';
 import { AlertLog } from '../entities/alert-log.entity';
 import { BlockedIp } from '../entities/blocked-ip.entity';
+import { User } from '../entities/user.entity';
+import { MailModule } from '../mail/mail.module';
 
 @Global()
 @Module({
-  imports: [TypeOrmModule.forFeature([AuthLog, ActivityLog, ApiLog, ErrorLog, SecurityEvent, AlertLog, BlockedIp])],
+  imports: [
+    TypeOrmModule.forFeature([AuthLog, ActivityLog, ApiLog, ErrorLog, SecurityEvent, AlertLog, BlockedIp, User]),
+    MailModule,
+  ],
   controllers: [MonitoringController],
   providers: [MonitoringService, SecurityService],
   exports: [MonitoringService, SecurityService],

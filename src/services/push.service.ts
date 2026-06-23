@@ -7,6 +7,14 @@ import * as crypto from 'node:crypto';
 import axios from 'axios';
 import { UserFcmToken } from '../entities/user-fcm-token.entity';
 import { Notification } from '../entities/notification.entity';
+import { NotificationOutbox, NotificationOutboxStatus } from '../entities/notification-outbox.entity';
+
+interface PushResult {
+  sent: number;
+  /** true if the push leg failed in a way worth retrying later (OAuth/network/FCM-side error) */
+  shouldRetry: boolean;
+  error?: string;
+}
 
 @Injectable()
 export class PushService {
@@ -15,6 +23,7 @@ export class PushService {
   constructor(
     @InjectRepository(UserFcmToken) private readonly userFcmTokenRepo: Repository<UserFcmToken>,
     @InjectRepository(Notification) private readonly notifRepo: Repository<Notification>,
+    @InjectRepository(NotificationOutbox) private readonly outboxRepo: Repository<NotificationOutbox>,
   ) {}
 
   private getServiceAccount(): any {
@@ -58,7 +67,17 @@ export class PushService {
     }
   }
 
-  async send(userIds: number | number[], title: string, body: string, data: Record<string, string> = {}): Promise<number> {
+  /**
+   * Sends an in-app notification (always) and attempts FCM push (best-effort).
+   * If the FCM leg fails for transient reasons (OAuth/network/FCM-side error),
+   * the (user, title, body) is queued in notification_outbox for retry by
+   * PushOutboxService's cron — the in-app notification is never re-queued,
+   * since the DB insert above already succeeded.
+   */
+  async send(
+    userIds: number | number[], title: string, body: string,
+    data: Record<string, string> = {}, createdBy: number | null = null,
+  ): Promise<number> {
     const ids = Array.isArray(userIds) ? userIds : [userIds];
     if (!ids.length) return 0;
 
@@ -77,25 +96,39 @@ export class PushService {
       })),
     );
 
+    const result = await this.pushOnly(ids, title, body, data);
+
+    if (result.shouldRetry) {
+      await this.enqueueOutbox(ids, title, body, data, createdBy, result.error);
+    }
+
+    return result.sent;
+  }
+
+  /**
+   * FCM-only send (no in-app notification insert) — used both by send() above
+   * and by PushOutboxService when retrying a previously-failed push.
+   */
+  async pushOnly(userIds: number[], title: string, body: string, data: Record<string, string> = {}): Promise<PushResult> {
     const sa = this.getServiceAccount();
     if (!sa?.project_id) {
-      this.logger.warn('send(): no firebase-service-account.json found, skipping FCM push');
-      return 0;
+      this.logger.warn('pushOnly(): no firebase-service-account.json found, skipping FCM push');
+      return { sent: 0, shouldRetry: false }; // missing config isn't a transient failure — retrying won't help
     }
 
     const accessToken = await this.getAccessToken(sa);
     if (!accessToken) {
-      this.logger.warn('send(): could not obtain FCM access token, skipping FCM push');
-      return 0;
+      return { sent: 0, shouldRetry: true, error: 'Could not obtain FCM access token (OAuth exchange failed)' };
     }
 
-    const tokens = await this.userFcmTokenRepo.find({ where: { user_id: In(ids) } });
-    if (!tokens.length) return 0;
+    const tokens = await this.userFcmTokenRepo.find({ where: { user_id: In(userIds) } });
+    if (!tokens.length) return { sent: 0, shouldRetry: false }; // no device registered — nothing to retry
 
     const url = `https://fcm.googleapis.com/v1/projects/${sa.project_id}/messages:send`;
     const CONCURRENCY = 20;
     let sent = 0;
     const stale: string[] = [];
+    const errors: string[] = [];
 
     const sendOne = async (token: string) => {
       try {
@@ -114,7 +147,9 @@ export class PushService {
         if (e.response?.data?.error?.details?.some((d: any) => d.errorCode === 'UNREGISTERED')) {
           stale.push(token);
         } else {
-          this.logger.warn(`FCM send failed for token ending …${token.slice(-8)}: ${JSON.stringify(e.response?.data ?? e.message)}`);
+          const msg = JSON.stringify(e.response?.data ?? e.message);
+          this.logger.warn(`FCM send failed for token ending …${token.slice(-8)}: ${msg}`);
+          errors.push(msg);
         }
       }
     };
@@ -127,6 +162,30 @@ export class PushService {
       await this.userFcmTokenRepo.delete({ token: In(stale) });
     }
 
-    return sent;
+    // Retry only if every live token failed and none succeeded — a partial
+    // success (some tokens delivered) isn't worth re-sending duplicates for.
+    const shouldRetry = sent === 0 && errors.length > 0;
+    return { sent, shouldRetry, error: errors[0] };
+  }
+
+  private async enqueueOutbox(
+    userIds: number[], title: string, body: string, data: Record<string, string>,
+    createdBy: number | null, lastError?: string,
+  ): Promise<void> {
+    await this.outboxRepo.insert(
+      userIds.map((uid) => ({
+        user_id: uid,
+        title,
+        body,
+        type: data.type ?? 'push',
+        data,
+        status: NotificationOutboxStatus.PENDING,
+        attempts: 0,
+        last_error: lastError ?? null,
+        is_active: true,
+        created_by: createdBy,
+        updated_by: createdBy,
+      })),
+    );
   }
 }

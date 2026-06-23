@@ -110,6 +110,7 @@ export class RequestLoggingMiddleware implements NestMiddleware {
               title: '500 Internal Server Error',
               message: `${method} ${url} → 500 from IP ${ip}`,
               metadata: { requestId, ip, endpoint: url, method, userId: user?.user_id },
+              channels: ['dashboard', 'email'],
             });
           }
 

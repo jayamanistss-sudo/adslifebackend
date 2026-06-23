@@ -44,6 +44,7 @@ export class SecurityService {
             title: 'Brute Force Attack Detected',
             message: `IP ${ip} has ${count} failed login attempts in 10 minutes`,
             metadata: { ip, fail_count: count },
+            channels: ['dashboard', 'email'],
           });
           await this.sendWebhookAlert('Brute Force Attack', `IP ${ip} — ${count} failed logins in 10min`, severity);
         }
@@ -70,6 +71,7 @@ export class SecurityService {
           title: 'Excessive Request Rate',
           message: `IP ${ip} — ${count} req/min on ${endpoint}`,
           metadata: { ip, count, endpoint },
+          channels: ['dashboard', 'email'],
         });
         await this.sendWebhookAlert('Rate Abuse', `IP ${ip} — ${count} req/min`, severity);
       } catch { /* never throw */ }

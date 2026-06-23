@@ -9,7 +9,8 @@ import { ErrorLog } from '../entities/error-log.entity';
 import { SecurityEvent } from '../entities/security-event.entity';
 import { AlertLog } from '../entities/alert-log.entity';
 import { BlockedIp } from '../entities/blocked-ip.entity';
-import { User } from '../entities/user.entity';
+import { User, UserRole } from '../entities/user.entity';
+import { MailService } from '../mail/mail.service';
 
 const SENSITIVE = new Set([
   'password', 'password_hash', 'token', 'otp', 'secret', 'api_key',
@@ -49,7 +50,9 @@ export class MonitoringService {
     @InjectRepository(SecurityEvent) private readonly securityEventRepo: Repository<SecurityEvent>,
     @InjectRepository(AlertLog) private readonly alertLogRepo: Repository<AlertLog>,
     @InjectRepository(BlockedIp) private readonly blockedIpRepo: Repository<BlockedIp>,
+    @InjectRepository(User) private readonly userRepo: Repository<User>,
     @InjectDataSource() private readonly dataSource: DataSource,
+    private readonly mail: MailService,
   ) {}
 
   // ─── Writers (fire-and-forget safe) ─────────────────────────────────────────
@@ -166,15 +169,50 @@ export class MonitoringService {
     title: string; message: string; metadata?: any; channels?: string[];
   }) {
     try {
+      const channels = d.channels ?? ['dashboard'];
+
       await this.alertLogRepo.save({
         alert_type: d.alertType,
         severity: d.severity,
         title: trunc(d.title, 255) as string,
         message: trunc(d.message, 2000) as string,
         metadata: d.metadata ?? null,
-        notified_channels: d.channels ?? ['dashboard'],
+        notified_channels: channels,
       });
+
+      if (channels.includes('email') && (d.severity === 'error' || d.severity === 'critical')) {
+        await this.maybeSendAlertEmail(d.alertType, d.title, d.message, d.severity);
+      }
     } catch { /* never throw */ }
+  }
+
+  /**
+   * Throttled per alert_type — at most one email every 15 minutes for the
+   * same alert_type, so a sustained incident (e.g. repeated 500s during a
+   * network outage) doesn't flood the admin's inbox with one email per error.
+   */
+  private async maybeSendAlertEmail(alertType: string, title: string, message: string, severity: string): Promise<void> {
+    const recentlyEmailed = await this.alertLogRepo
+      .createQueryBuilder('a')
+      .where('a.alert_type = :alertType', { alertType })
+      .andWhere('a.created_at >= :since', { since: subtractMinutes(15) })
+      .andWhere(`a.notified_channels::jsonb @> '["email"]'::jsonb`)
+      .getCount();
+    if (recentlyEmailed > 1) return; // the row this call just inserted always counts as 1
+
+    const admins = await this.userRepo.find({ where: { role: UserRole.ADMIN }, select: ['email'] });
+    if (!admins.length) return;
+
+    const html = `
+      <div style="font-family:sans-serif;max-width:560px;margin:0 auto;padding:24px;">
+        <h2 style="color:#dc2626;margin:0 0 4px;">⚠ ${severity.toUpperCase()}: ${title}</h2>
+        <p style="color:#555;font-size:14px;line-height:1.6;white-space:pre-wrap;">${message}</p>
+        <p style="color:#999;font-size:11px;margin-top:20px;">alert_type: ${alertType} · ${new Date().toISOString()}</p>
+      </div>`;
+
+    await Promise.all(
+      admins.map((a) => this.mail.send(a.email, `[AdsLife Alert] ${title}`, html).catch(() => {})),
+    );
   }
 
   // ─── Blocked IP ──────────────────────────────────────────────────────────────

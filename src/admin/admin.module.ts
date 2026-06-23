@@ -15,6 +15,7 @@ import { FraudFlag } from '../entities/fraud-flag.entity';
 import { Payment } from '../entities/payment.entity';
 import { UserFcmToken } from '../entities/user-fcm-token.entity';
 import { Notification } from '../entities/notification.entity';
+import { NotificationOutbox } from '../entities/notification-outbox.entity';
 import { MailModule } from '../mail/mail.module';
 
 @Module({
@@ -22,7 +23,7 @@ import { MailModule } from '../mail/mail.module';
     TypeOrmModule.forFeature([
       User, Vendor, Offer, SiteSetting, VendorDailyStat, UserInteraction,
       VendorApplication, SubscriptionPlan, FraudFlag, Payment,
-      UserFcmToken, Notification,
+      UserFcmToken, Notification, NotificationOutbox,
     ]),
     MailModule,
   ],

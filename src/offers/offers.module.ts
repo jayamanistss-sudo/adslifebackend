@@ -14,10 +14,11 @@ import { Notification } from '../entities/notification.entity';
 import { OfferReview } from '../entities/offer-review.entity';
 import { OfferReport } from '../entities/offer-report.entity';
 import { FraudFlag } from '../entities/fraud-flag.entity';
+import { NotificationOutbox } from '../entities/notification-outbox.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Offer, Vendor, VendorFollower, UserFcmToken, Notification, OfferReview, OfferReport, FraudFlag]),
+    TypeOrmModule.forFeature([Offer, Vendor, VendorFollower, UserFcmToken, Notification, OfferReview, OfferReport, FraudFlag, NotificationOutbox]),
     GatewayModule,
   ],
   controllers: [OffersController],
