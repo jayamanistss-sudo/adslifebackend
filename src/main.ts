@@ -28,8 +28,8 @@ async function bootstrap() {
     },
   }));
 
-  // Request size limit
-  app.use(express.json({ limit: '10mb' }));
+  // Request size limit (raised for base64-encoded image payloads, ~33% larger than the 5MB raw image)
+  app.use(express.json({ limit: '15mb' }));
 
   // Serve landing page at root
   app.useStaticAssets(join(process.cwd(), 'public'));

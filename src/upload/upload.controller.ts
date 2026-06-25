@@ -1,14 +1,10 @@
 import {
   Controller, Post, UseInterceptors, UploadedFile,
-  UseGuards, BadRequestException, InternalServerErrorException,
+  UseGuards, BadRequestException,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiTags, ApiBearerAuth, ApiConsumes, ApiBody } from '@nestjs/swagger';
-import { ConfigService } from '@nestjs/config';
 import { memoryStorage } from 'multer';
-import { randomUUID } from 'node:crypto';
-import { promises as fs } from 'node:fs';
-import { join } from 'node:path';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 
 const ALLOWED_MIMES: Record<string, string> = {
@@ -24,8 +20,6 @@ const MAX_SIZE = 5 * 1024 * 1024;
 @UseGuards(JwtAuthGuard)
 @Controller('upload')
 export class UploadController {
-  constructor(private readonly config: ConfigService) {}
-
   @Post('image')
   @ApiConsumes('multipart/form-data')
   @ApiBody({
@@ -52,22 +46,13 @@ export class UploadController {
   async uploadImage(@UploadedFile() file: Express.Multer.File) {
     if (!file) throw new BadRequestException('No image uploaded');
 
-    const uploadDir = this.config.get<string>('upload.dir')!;
-    const baseUrl   = this.config.get<string>('upload.baseUrl')!;
-    const ext       = ALLOWED_MIMES[file.mimetype];
-    const filename  = `${randomUUID()}.${ext}`;
-
-    try {
-      await fs.mkdir(uploadDir, { recursive: true });
-      await fs.writeFile(join(uploadDir, filename), file.buffer);
-    } catch (err: any) {
-      throw new InternalServerErrorException(err?.message ?? 'Image upload failed, please try again');
-    }
+    const ext = ALLOWED_MIMES[file.mimetype];
+    const dataUrl = `data:${file.mimetype};base64,${file.buffer.toString('base64')}`;
 
     return {
       success: true,
       data: {
-        url:    `${baseUrl}/${filename}`,
+        url:    dataUrl,
         size:   file.size,
         format: ext,
       },
