@@ -1,8 +1,8 @@
 import {
   Controller, Post, Put, Body, Get, Query,
-  UseGuards, HttpCode, HttpStatus, Req, BadRequestException,
+  UseGuards, HttpCode, HttpStatus, Req, Res, BadRequestException,
 } from '@nestjs/common';
-import type { Request } from 'express';
+import type { Request, Response } from 'express';
 import { ApiTags, ApiBearerAuth, ApiBody } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
@@ -19,6 +19,19 @@ function reqCtx(req: Request) {
   return { ip, ua: req.get('user-agent') ?? '', requestId: (req as any).requestId };
 }
 
+const COOKIE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+
+function setAuthCookie(res: Response, token?: string) {
+  if (!token) return;
+  res.cookie('adslife_token', token, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV !== 'development',
+    sameSite: 'lax',
+    maxAge: COOKIE_TTL_MS,
+    path: '/',
+  });
+}
+
 @ApiTags('auth')
 @Controller('auth')
 export class AuthController {
@@ -29,8 +42,9 @@ export class AuthController {
   @Post('login')
   @HttpCode(HttpStatus.OK)
   @ApiBody({ type: LoginDto })
-  async login(@Body() dto: LoginDto, @Req() req: Request) {
+  async login(@Body() dto: LoginDto, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
     const data = await this.authService.login(dto, reqCtx(req));
+    setAuthCookie(res, data.token);
     return { success: true, data, message: 'Login successful' };
   }
 
@@ -38,16 +52,18 @@ export class AuthController {
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   @Post('register')
   @ApiBody({ type: RegisterDto })
-  async register(@Body() dto: RegisterDto, @Req() req: Request) {
+  async register(@Body() dto: RegisterDto, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
     const data = await this.authService.register(dto, reqCtx(req));
+    setAuthCookie(res, data.token);
     return { success: true, data, message: 'Registration successful' };
   }
 
   @Public()
   @Post('google')
   @HttpCode(HttpStatus.OK)
-  async googleAuth(@Body() dto: GoogleAuthDto) {
+  async googleAuth(@Body() dto: GoogleAuthDto, @Res({ passthrough: true }) res: Response) {
     const data = await this.authService.googleAuth(dto.access_token);
+    setAuthCookie(res, data.token);
     return { success: true, data, message: 'Google auth successful' };
   }
 
@@ -164,8 +180,9 @@ export class AuthController {
   @ApiBearerAuth()
   @Post('logout')
   @HttpCode(HttpStatus.OK)
-  async logout(@CurrentUser() user: any, @Req() req: Request) {
+  async logout(@CurrentUser() user: any, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
     const data = await this.authService.logout(user.user_id, reqCtx(req));
+    res.clearCookie('adslife_token', { path: '/' });
     return { success: true, data };
   }
 

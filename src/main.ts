@@ -4,11 +4,15 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { join } from 'node:path';
 import * as express from 'express';
+import * as cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
+
+  // Parse cookies — required for httpOnly JWT cookie auth on web clients
+  app.use(cookieParser());
 
   // Capture raw body for Cashfree webhook HMAC verification BEFORE json parsing
   app.use('/api/payment/webhook', express.raw({ type: 'application/json' }));

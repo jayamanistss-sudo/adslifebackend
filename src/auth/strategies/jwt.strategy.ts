@@ -13,7 +13,12 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     @InjectRepository(User) private readonly userRepo: Repository<User>,
   ) {
     super({
-      jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
+      jwtFromRequest: ExtractJwt.fromExtractors([
+        // 1. httpOnly cookie (web browser clients — XSS-safe)
+        (req: any) => req?.cookies?.adslife_token ?? null,
+        // 2. Authorization: Bearer header (mobile apps, Postman, server-to-server)
+        ExtractJwt.fromAuthHeaderAsBearerToken(),
+      ]),
       ignoreExpiration: false,
       secretOrKey: config.get<string>('jwt.secret'),
     });
