@@ -218,9 +218,18 @@ export class OffersService {
     };
   }
 
-  async trackView(offerId: number) {
+  async trackView(offerId: number, ip: string) {
+    // Deduplicate by IP: one view per IP per offer per hour stored in a simple in-memory map.
+    // This prevents page-refresh spam without requiring auth.
+    const key = `${ip}:${offerId}`;
+    const now = Date.now();
+    const lastSeen = OffersService.viewCache.get(key) ?? 0;
+    if (now - lastSeen < 3600000) return;
+    OffersService.viewCache.set(key, now);
     await this.offerRepo.increment({ id: offerId }, 'views', 1);
   }
+
+  private static readonly viewCache = new Map<string, number>();
 
   async myOffers(userId: number) {
     const vendorId = await this.getVendorId(userId);

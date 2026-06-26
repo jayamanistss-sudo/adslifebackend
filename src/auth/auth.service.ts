@@ -254,6 +254,15 @@ export class AuthService {
     return { message: 'Password reset successful. Please log in again.' };
   }
 
+  async getMe(userId: number) {
+    const user = await this.userRepo.findOne({
+      where: { id: userId },
+      select: ['id', 'name', 'email', 'phone', 'city', 'avatar_url', 'role'],
+    });
+    if (!user) throw new NotFoundException('User not found');
+    return user;
+  }
+
   async updateProfile(userId: number, dto: { name?: string; phone?: string; city?: string; avatar_url?: string }) {
     const allowed = ['name', 'phone', 'city', 'avatar_url'] as const;
     const updateData: Partial<User> = {};

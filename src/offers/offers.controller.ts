@@ -1,7 +1,7 @@
 import {
   Controller, Get, Post, Put, Delete,
   Body, Param, ParseIntPipe, UseGuards,
-  Query, DefaultValuePipe,
+  Query, DefaultValuePipe, Req,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { OffersService } from './offers.service';
@@ -35,8 +35,9 @@ export class OffersController {
 
   @Public()
   @Post(':id/view')
-  async trackView(@Param('id', ParseIntPipe) id: number) {
-    await this.offersService.trackView(id);
+  async trackView(@Param('id', ParseIntPipe) id: number, @Req() req: Request) {
+    const ip = (req as any).headers['x-forwarded-for']?.split(',')[0]?.trim() ?? (req as any).socket?.remoteAddress ?? 'unknown';
+    await this.offersService.trackView(id, ip);
     return { success: true };
   }
 

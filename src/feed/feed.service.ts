@@ -303,17 +303,17 @@ export class FeedService {
 
     const colMap: Record<string, string> = { view: 'views', click: 'clicks', save: 'saves' };
     if (colMap[action]) {
-      if (action === 'view') {
-        // Deduplicate views per user per offer within a 24-hour window
-        const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
-        const recentView = await this.userInteractionRepo
+      // Deduplicate view and click counts per user per offer within a 1-hour window
+      if (action === 'view' || action === 'click') {
+        const since = new Date(Date.now() - 60 * 60 * 1000);
+        const recent = await this.userInteractionRepo
           .createQueryBuilder('ui')
           .where('ui.user_id = :userId AND ui.offer_id = :offerId AND ui.action = :action AND ui.created_at >= :since', {
-            userId, offerId, action: 'view', since,
+            userId, offerId, action, since,
           })
           .getCount();
-        if (recentView <= 1) {
-          await this.offerRepo.increment({ id: offerId }, 'views', 1);
+        if (recent <= 1) {
+          await this.offerRepo.increment({ id: offerId }, colMap[action], 1);
         }
       } else {
         await this.offerRepo.increment({ id: offerId }, colMap[action], 1);

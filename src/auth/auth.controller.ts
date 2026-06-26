@@ -108,8 +108,9 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @Get('me')
-  getMe(@CurrentUser() user: any) {
-    return { success: true, data: user };
+  async getMe(@CurrentUser() user: any) {
+    const data = await this.authService.getMe(user.user_id);
+    return { success: true, data };
   }
 
   @UseGuards(JwtAuthGuard)
