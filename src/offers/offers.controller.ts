@@ -26,6 +26,7 @@ export class OffersController {
     private readonly offerReportsService: OfferReportsService,
   ) {}
 
+  @Public()
   @UseGuards(OptionalJwtAuthGuard)
   @Get(':id')
   async detail(@CurrentUser() user: any, @Param('id', ParseIntPipe) id: number) {

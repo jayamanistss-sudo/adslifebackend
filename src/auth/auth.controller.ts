@@ -1,6 +1,6 @@
 import {
   Controller, Post, Put, Body, Get, Query,
-  UseGuards, HttpCode, HttpStatus, Req,
+  UseGuards, HttpCode, HttpStatus, Req, BadRequestException,
 } from '@nestjs/common';
 import type { Request } from 'express';
 import { ApiTags, ApiBearerAuth, ApiBody } from '@nestjs/swagger';
@@ -121,12 +121,12 @@ export class AuthController {
     @Body() dto: { lat: number; lng: number; city?: string; accuracy?: number; source?: string },
   ) {
     if (dto.lat == null || dto.lng == null) {
-      return { success: false, error: 'lat and lng are required' };
+      throw new BadRequestException('lat and lng are required');
     }
     const lat = Number(dto.lat);
     const lng = Number(dto.lng);
     if (Number.isNaN(lat) || Number.isNaN(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
-      return { success: false, error: 'Invalid coordinates' };
+      throw new BadRequestException('Invalid coordinates');
     }
     const data = await this.authService.updateLocation(
       user.user_id, lat, lng, dto.city,

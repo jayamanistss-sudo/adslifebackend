@@ -42,10 +42,29 @@ async function bootstrap() {
   expressApp.get('/monitor', (_req: any, res: any) => res.sendFile(join(process.cwd(), 'public', 'monitoring.html')));
   expressApp.get('/swagger', (_req: any, res: any) => res.redirect('/docs'));
 
+  const allowedOrigins = (process.env.ALLOWED_ORIGINS ?? '')
+    .split(',')
+    .map((o) => o.trim())
+    .filter(Boolean);
+  const defaultOrigins = [
+    'https://adslife.in',
+    'https://www.adslife.in',
+    'https://dev.adslife.in',
+    'https://test.adslife.in',
+    'http://localhost:5173',
+    'http://localhost:4173',
+  ];
+  const corsOrigins = allowedOrigins.length ? allowedOrigins : defaultOrigins;
+
   app.enableCors({
-    origin: '*',
+    origin: (origin, callback) => {
+      // Allow non-browser clients (mobile apps, Postman, curl) and listed origins
+      if (!origin || corsOrigins.includes(origin)) return callback(null, true);
+      callback(null, false);
+    },
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
+    credentials: true,
   });
 
   app.useGlobalPipes(

@@ -35,7 +35,9 @@ export class FeedService {
     const prefs = await this.userPrefRepo.findOne({ where: { user_id: userId } });
     const safeJson = (v: any): any[] => { try { const p = JSON.parse(v ?? '[]'); return Array.isArray(p) ? p : []; } catch { return []; } };
     const preferredCategories: string[] = safeJson(prefs?.preferred_categories);
-    const preferredVendors: number[] = safeJson(prefs?.preferred_vendors);
+    // Sanitize to positive integers to prevent SQL injection in the raw IN() clause
+    const preferredVendors: number[] = safeJson(prefs?.preferred_vendors)
+      .map(Number).filter((n: number) => Number.isInteger(n) && n > 0);
 
     const distExpr = lat && lng
       ? `(6371 * ACOS(GREATEST(-1, LEAST(1,
