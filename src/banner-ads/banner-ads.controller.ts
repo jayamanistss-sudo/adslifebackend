@@ -24,14 +24,30 @@ export class BannerAdsController {
   @Public()
   @Get()
   async list() {
-    const data = await this.bannerRepo
+    const requests = await this.bannerRepo
       .createQueryBuilder('ba')
-      .select(['ba', 'v.business_name'])
-      .innerJoin(Vendor, 'v', 'ba.vendor_id = v.id')
       .where("ba.status = 'approved'")
       .andWhere('(ba.expires_at IS NULL OR ba.expires_at > NOW())')
       .orderBy('ba.created_at', 'DESC')
-      .getRawMany();
+      .getMany();
+
+    const vendorIds = [...new Set(requests.map((r) => r.vendor_id))];
+    const vendors = vendorIds.length
+      ? await this.vendorRepo.find({ where: { id: In(vendorIds) }, select: ['id', 'business_name', 'logo_url'] })
+      : [];
+    const vendorMap = new Map(vendors.map((v) => [v.id, v]));
+
+    const data = requests.map((r) => ({
+      id: r.id,
+      title: r.title,
+      image_url: r.image_url,
+      media_type: r.media_type,
+      target_url: r.target_url,
+      position: r.position,
+      business_name: vendorMap.get(r.vendor_id)?.business_name ?? null,
+      vendor_logo: vendorMap.get(r.vendor_id)?.logo_url ?? null,
+      expires_at: r.expires_at,
+    }));
     return { success: true, data };
   }
 
