@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
@@ -287,6 +287,100 @@ export class VendorService {
       .getRawOne();
     if (!vendor) throw new NotFoundException('Vendor not found');
     return vendor;
+  }
+
+  async aiGenerateOffer(userId: number, websiteUrl: string, prompt: string) {
+    const vendor = await this.vendorRepo.findOne({
+      where: { user_id: userId },
+      select: ['id', 'business_name', 'city', 'category'],
+    });
+    if (!vendor) throw new NotFoundException('Vendor profile not found');
+
+    // Fetch website content for context
+    let siteText = '';
+    try {
+      const res = await fetch(websiteUrl, {
+        signal: AbortSignal.timeout(8000),
+        headers: { 'User-Agent': 'AdsLife-Bot/1.0' },
+      });
+      const html = await res.text();
+      // Strip tags, collapse whitespace, limit to 1500 chars
+      siteText = html
+        .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+        .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 1500);
+    } catch {
+      // proceed without site content if fetch fails
+    }
+
+    const systemPrompt = `You are an expert marketing copywriter for Indian local businesses.
+Generate a promotional offer for a business.
+Respond ONLY with a valid JSON object — no markdown, no explanation, no code fences.
+The JSON must have exactly these fields:
+{
+  "title": "short catchy offer title (max 80 chars)",
+  "description": "compelling 2-3 sentence description of the offer",
+  "category": "one of: it-services, web-and-apps, software, food-and-dining, fashion, electronics, beauty, travel, entertainment, grocery, health, sports, general, networking, hardware, cybersecurity, cloud, gaming",
+  "discount_percent": number between 5 and 70,
+  "original_price": number in INR,
+  "offer_price": number in INR,
+  "coupon_code": "SHORT_CODE (max 12 chars, uppercase, no spaces)",
+  "image_prompt": "a detailed prompt for generating a relevant promotional image (describe visuals, colors, style)"
+}`;
+
+    const userMessage = `Business: ${vendor.business_name || 'Local Business'}
+City: ${vendor.city || 'India'}
+Website content: ${siteText || 'Not available'}
+Vendor request: ${prompt}
+
+Generate a compelling offer JSON.`;
+
+    // Call Pollinations.ai text API (free, no key required)
+    const pollinationsRes = await fetch('https://text.pollinations.ai/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userMessage },
+        ],
+        model: 'openai',
+        jsonMode: true,
+      }),
+      signal: AbortSignal.timeout(30000),
+    });
+
+    if (!pollinationsRes.ok) {
+      throw new BadRequestException('AI service unavailable, please try again');
+    }
+
+    const rawText = await pollinationsRes.text();
+    let offerData: any;
+    try {
+      // Strip markdown fences if present
+      const clean = rawText.replace(/```json?\n?/gi, '').replace(/```/g, '').trim();
+      offerData = JSON.parse(clean);
+    } catch {
+      throw new BadRequestException('AI returned invalid response, please try again');
+    }
+
+    // Build Pollinations image URL from the generated image_prompt
+    const imagePrompt = offerData.image_prompt || `${offerData.title} promotional offer advertisement`;
+    const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(imagePrompt)}?width=800&height=600&nologo=true&seed=${Date.now()}`;
+
+    return {
+      title:            offerData.title            ?? '',
+      description:      offerData.description      ?? '',
+      category:         offerData.category         ?? 'general',
+      discount_percent: offerData.discount_percent ?? 20,
+      original_price:   offerData.original_price   ?? '',
+      offer_price:      offerData.offer_price       ?? '',
+      coupon_code:      offerData.coupon_code       ?? '',
+      image_url:        imageUrl,
+    };
   }
 
   async budgetSuggest(userId: number) {

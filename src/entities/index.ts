@@ -29,6 +29,7 @@ export { SecurityEvent } from './security-event.entity';
 export { AlertLog } from './alert-log.entity';
 export { BlockedIp } from './blocked-ip.entity';
 export { BannerAdRequest } from './banner-ad-request.entity';
+export { BannerPlan } from './banner-plan.entity';
 export { Leaderboard } from './leaderboard.entity';
 export { ShareEvent } from './share-event.entity';
 export { SpotlightRequest } from './spotlight-request.entity';
@@ -69,6 +70,7 @@ import { SecurityEvent } from './security-event.entity';
 import { AlertLog } from './alert-log.entity';
 import { BlockedIp } from './blocked-ip.entity';
 import { BannerAdRequest } from './banner-ad-request.entity';
+import { BannerPlan } from './banner-plan.entity';
 import { Leaderboard } from './leaderboard.entity';
 import { ShareEvent } from './share-event.entity';
 import { SpotlightRequest } from './spotlight-request.entity';
@@ -110,6 +112,7 @@ export const entities = [
   AlertLog,
   BlockedIp,
   BannerAdRequest,
+  BannerPlan,
   Leaderboard,
   ShareEvent,
   SpotlightRequest,

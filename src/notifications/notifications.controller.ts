@@ -1,12 +1,15 @@
-import { Controller, Get, Post, Put, Body, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Query, Param, ParseIntPipe, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { NotificationsService } from './notifications.service';
+import { NotificationTemplateService } from './notification-template.service';
+import { GeminiTemplateService } from './gemini-template.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import {
   SaveTokenDto, MarkReadDto, NotificationsListQueryDto, TriggerNotificationDto,
+  CreateTemplateDto, UpdateTemplateDto,
 } from './dto/notifications.dto';
 
 @ApiTags('notifications')
@@ -14,7 +17,11 @@ import {
 @UseGuards(JwtAuthGuard)
 @Controller('notifications')
 export class NotificationsController {
-  constructor(private readonly notificationsService: NotificationsService) {}
+  constructor(
+    private readonly notificationsService: NotificationsService,
+    private readonly templateService: NotificationTemplateService,
+    private readonly geminiService: GeminiTemplateService,
+  ) {}
 
   @Get()
   async list(@CurrentUser() user: any, @Query() query: NotificationsListQueryDto) {
@@ -50,5 +57,61 @@ export class NotificationsController {
       dto.data ?? {},
     );
     return { success: true, data: result };
+  }
+
+  // ── Admin template management ──────────────────────────────────────────────
+
+  @UseGuards(RolesGuard)
+  @Roles('admin')
+  @Get('templates')
+  async listTemplates(@Query('type') type?: string) {
+    const [data, stats] = await Promise.all([
+      this.templateService.adminList(type),
+      this.templateService.adminStats(),
+    ]);
+    return { success: true, data, stats };
+  }
+
+  @UseGuards(RolesGuard)
+  @Roles('admin')
+  @Post('templates')
+  async createTemplate(@Body() dto: CreateTemplateDto) {
+    const data = await this.templateService.adminCreate(dto);
+    return { success: true, data };
+  }
+
+  @UseGuards(RolesGuard)
+  @Roles('admin')
+  @Put('templates/:id')
+  async updateTemplate(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateTemplateDto,
+  ) {
+    const data = await this.templateService.adminUpdate(id, dto);
+    return { success: true, data };
+  }
+
+  @UseGuards(RolesGuard)
+  @Roles('admin')
+  @Delete('templates/:id')
+  async deleteTemplate(@Param('id', ParseIntPipe) id: number) {
+    await this.templateService.adminDelete(id);
+    return { success: true };
+  }
+
+  @UseGuards(RolesGuard)
+  @Roles('admin')
+  @Post('templates/generate')
+  async generateTemplates() {
+    await this.geminiService.generateDailyBatch();
+    return { success: true, message: 'AI generation triggered' };
+  }
+
+  @UseGuards(RolesGuard)
+  @Roles('admin')
+  @Post('templates/seed')
+  async seedTemplates() {
+    const inserted = await this.templateService.seedFromDefaults();
+    return { success: true, data: { inserted } };
   }
 }

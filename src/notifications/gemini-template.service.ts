@@ -4,9 +4,9 @@ import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
 import { NotificationTemplateService } from './notification-template.service';
 
-const TYPES = ['morning', 'lunch', 'evening', 'dinner', 'goodnight', 'weekend', 'reengage', 'personalized_search'];
+const TYPES = ['morning', 'lunch', 'evening', 'dinner', 'goodnight', 'weekend', 'reengage', 'personalized_search', 'interest_alert'];
 
-const PROMPT = `You write short push notification messages for "AdsLife", a hyperlocal deals & offers app in Tamil Nadu, India. Style: a natural Tamil/English code-mix (Tanglish) the way Swiggy/Zomato write notifications, upbeat, one emoji, under 100 characters for the body. Always end "personalized_search" bodies with the literal placeholder {{term}} where the user's search term should be substituted, e.g. "நீங்க பார்த்த {{term}} offers இன்னும் available இருக்கு!".
+const PROMPT = `You write short push notification messages for "AdsLife", a hyperlocal deals & offers app in Tamil Nadu, India. Style: a natural Tamil/English code-mix (Tanglish) the way Swiggy/Zomato write notifications, upbeat, one emoji, under 100 characters for the body. Rules for specific types: "personalized_search" bodies must end with the literal placeholder {{term}} (user's search term). "interest_alert" bodies must include the literal placeholder {{category}} (user's favourite category, e.g. Beauty, Food, Electronics).
 
 Generate 4 NEW, DIFFERENT message variants for each of these notification types: ${TYPES.join(', ')}.
 

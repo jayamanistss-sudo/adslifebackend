@@ -99,4 +99,22 @@ export class VendorController {
     const data = await this.vendorService.budgetSuggest(user.user_id);
     return { success: true, data };
   }
+
+  @Roles('vendor', 'admin')
+  @Post('ai-generate-offer')
+  @ApiBody({ schema: { required: ['website_url', 'prompt'], properties: {
+    website_url: { type: 'string', example: 'https://stss.in' },
+    prompt: { type: 'string', example: 'Create a web development offer with 30% discount' },
+  }}})
+  async aiGenerateOffer(
+    @CurrentUser() user: any,
+    @Body('website_url') websiteUrl: string,
+    @Body('prompt') prompt: string,
+  ) {
+    if (!websiteUrl || !prompt) {
+      return { success: false, error: 'website_url and prompt are required' };
+    }
+    const data = await this.vendorService.aiGenerateOffer(user.user_id, websiteUrl, prompt);
+    return { success: true, data };
+  }
 }

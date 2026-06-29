@@ -181,6 +181,9 @@ export class OffersService {
         'o.views AS views',
         'o.clicks AS clicks',
         'o.saves AS saves',
+        userId
+          ? `EXISTS(SELECT 1 FROM saved_offers WHERE offer_id = o.id AND user_id = ${userId}) AS "isSaved"`
+          : `FALSE AS "isSaved"`,
         'v.business_name AS "businessName"',
         'v.logo_url AS "vendorLogo"',
         'v.city AS "vendorCity"',
@@ -212,6 +215,7 @@ export class OffersService {
       offerPrice:      toNum(offer.offerPrice),
       vendorLat:       toNum(offer.vendorLat),
       vendorLng:       toNum(offer.vendorLng),
+      isSaved:         Boolean(offer.isSaved),
       avgRating,
       reviewCount,
       myReview: myReview ? { rating: myReview.rating, comment: myReview.comment } : null,

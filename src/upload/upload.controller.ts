@@ -78,8 +78,8 @@ export class UploadController {
     const { writeFileSync } = await import('node:fs');
     writeFileSync(dest, file.buffer);
 
-    // Build public URL using the /uploads prefix served by NestJS static assets
-    const baseUrl = process.env.API_BASE_URL ?? `http://localhost:${process.env.PORT ?? 3001}`;
+    // Build public URL — prefer API_BASE_URL, fall back to APP_URL, then localhost
+    const baseUrl = (process.env.API_BASE_URL ?? process.env.APP_URL ?? `http://localhost:${process.env.PORT ?? 3001}`).replace(/\/$/, '');
     const url = `${baseUrl}/uploads/images/${filename}`;
 
     return {

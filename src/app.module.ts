@@ -30,6 +30,7 @@ import { TranslateModule } from './translate/translate.module';
 import { UploadModule } from './upload/upload.module';
 import { AbTestModule } from './ab-test/ab-test.module';
 import { BannerAdsModule } from './banner-ads/banner-ads.module';
+import { BannerPlansModule } from './banner-plans/banner-plans.module';
 import { CategoriesModule } from './categories/categories.module';
 import { PlansModule } from './plans/plans.module';
 import { ShareModule } from './share/share.module';
@@ -66,6 +67,7 @@ import { GatewayModule } from './gateway/gateway.module';
     UploadModule,
     AbTestModule,
     BannerAdsModule,
+    BannerPlansModule,
     CategoriesModule,
     PlansModule,
     ShareModule,

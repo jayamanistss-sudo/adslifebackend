@@ -50,6 +50,12 @@ export class AdminController {
     return { success: true, data };
   }
 
+  @Get('vendors/:id')
+  async vendorDetail(@Param('id', ParseIntPipe) id: number) {
+    const data = await this.adminService.getVendorDetail(id);
+    return { success: true, data };
+  }
+
   @Put('review-vendor/:id')
   async reviewVendor(
     @Param('id', ParseIntPipe) id: number,

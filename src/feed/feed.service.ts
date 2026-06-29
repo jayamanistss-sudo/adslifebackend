@@ -296,6 +296,25 @@ export class FeedService {
     });
     if (!offer) throw new Error('Offer not found');
 
+    const colMap: Record<string, string> = { view: 'views', click: 'clicks', save: 'saves' };
+
+    // For view/click: skip both the row insert AND the counter increment if already logged within 1 hour.
+    // This keeps user_interactions consistent with the deduplicated offers.clicks/views columns.
+    if (action === 'view' || action === 'click') {
+      const since = new Date(Date.now() - 60 * 60 * 1000);
+      const recent = await this.userInteractionRepo
+        .createQueryBuilder('ui')
+        .where('ui.user_id = :userId AND ui.offer_id = :offerId AND ui.action = :action AND ui.created_at >= :since', {
+          userId, offerId, action, since,
+        })
+        .getCount();
+      if (recent > 0) {
+        // Already recorded within this window — skip save and counter update
+        if (offer.category) await this.updatePreferences(userId, offer.category, offerId, action);
+        return { recorded: false, vendor_id: offer.vendor_id };
+      }
+    }
+
     await this.userInteractionRepo.save({
       user_id: userId,
       offer_id: offerId,
@@ -303,23 +322,8 @@ export class FeedService {
       category: offer.category,
     });
 
-    const colMap: Record<string, string> = { view: 'views', click: 'clicks', save: 'saves' };
     if (colMap[action]) {
-      // Deduplicate view and click counts per user per offer within a 1-hour window
-      if (action === 'view' || action === 'click') {
-        const since = new Date(Date.now() - 60 * 60 * 1000);
-        const recent = await this.userInteractionRepo
-          .createQueryBuilder('ui')
-          .where('ui.user_id = :userId AND ui.offer_id = :offerId AND ui.action = :action AND ui.created_at >= :since', {
-            userId, offerId, action, since,
-          })
-          .getCount();
-        if (recent <= 1) {
-          await this.offerRepo.increment({ id: offerId }, colMap[action], 1);
-        }
-      } else {
-        await this.offerRepo.increment({ id: offerId }, colMap[action], 1);
-      }
+      await this.offerRepo.increment({ id: offerId }, colMap[action], 1);
     }
 
     if (action === 'save') {

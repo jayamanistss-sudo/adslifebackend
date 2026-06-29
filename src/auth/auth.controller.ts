@@ -124,8 +124,16 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @Get('me')
-  async getMe(@CurrentUser() user: any) {
+  async getMe(@CurrentUser() user: any, @Res({ passthrough: true }) res: Response) {
     const data = await this.authService.getMe(user.user_id);
+    // If the user's role changed since the JWT was issued (e.g. vendor approval),
+    // re-issue the cookie AND return the new token in the body so Bearer-token
+    // clients (web localStorage, mobile) can update without re-logging in.
+    if (data.role !== user.role) {
+      const token = this.authService.generateToken(data.id, data.role);
+      setAuthCookie(res, token);
+      return { success: true, data, token };
+    }
     return { success: true, data };
   }
 

@@ -149,6 +149,44 @@ export class AdminService {
     return { vendors, total };
   }
 
+  async getVendorDetail(vendorId: number) {
+    const row = await this.vendorRepo
+      .createQueryBuilder('v')
+      .innerJoin(User, 'u', 'u.id = v.user_id')
+      .leftJoin(Offer, 'o', 'o.vendor_id = v.id')
+      .leftJoin('vendor_followers', 'vf', 'vf.vendor_id = v.id')
+      .select([
+        'v.*',
+        'u.name AS owner_name', 'u.email AS owner_email', 'u.phone AS owner_phone',
+        'u.is_active AS user_active', 'u.created_at AS user_created_at',
+        'COUNT(DISTINCT o.id) AS total_offers',
+        'COUNT(DISTINCT CASE WHEN o.is_active = true THEN o.id END) AS active_offers',
+        'COALESCE(SUM(o.views), 0) AS total_views',
+        'COALESCE(SUM(o.clicks), 0) AS total_clicks',
+        'COALESCE(SUM(o.saves), 0) AS total_saves',
+        'COALESCE(SUM(o.current_redemptions), 0) AS total_redemptions',
+        'COUNT(DISTINCT vf.user_id) AS total_followers',
+      ])
+      .where('v.id = :vendorId', { vendorId })
+      .groupBy('v.id, u.name, u.email, u.phone, u.is_active, u.created_at')
+      .getRawOne();
+
+    if (!row) throw new NotFoundException('Vendor not found');
+
+    const offers = await this.offerRepo.find({
+      where: { vendor_id: vendorId },
+      order: { created_at: 'DESC' },
+      take: 20,
+    });
+
+    const application = await this.appRepo.findOne({
+      where: { user_id: row.user_id },
+      order: { created_at: 'DESC' },
+    });
+
+    return { vendor: row, offers, application };
+  }
+
   async reviewVendor(appId: number, status: string, note: string) {
     const allowed = ['approved', 'rejected'];
     if (!allowed.includes(status)) throw new BadRequestException('Invalid status');
@@ -169,6 +207,8 @@ export class AdminService {
               business_name: app.business_name, category: app.category,
               city: app.city, address: app.address, phone: app.phone,
               website: app.website, gst_number: app.gst_number, description: app.description,
+              lat: app.lat ?? null, lng: app.lng ?? null,
+              ...(app.logo_url ? { logo_url: app.logo_url } : {}),
             },
           );
         } else {
@@ -176,6 +216,8 @@ export class AdminService {
             user_id: app.user_id, business_name: app.business_name, category: app.category,
             city: app.city, address: app.address, phone: app.phone, website: app.website,
             gst_number: app.gst_number, description: app.description,
+            logo_url: app.logo_url ?? null,
+            lat: app.lat ?? null, lng: app.lng ?? null,
             status: VendorStatus.APPROVED, review_note: note || null, subscription_plan: 'free',
           });
         }

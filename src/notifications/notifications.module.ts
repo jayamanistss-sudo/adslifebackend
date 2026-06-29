@@ -8,6 +8,7 @@ import { NotificationTemplateService } from './notification-template.service';
 import { NotificationCapService } from './notification-cap.service';
 import { GeminiTemplateService } from './gemini-template.service';
 import { PushOutboxService } from './push-outbox.service';
+import { InterestNotificationService } from './interest-notification.service';
 import { PushService } from '../services/push.service';
 import { Notification } from '../entities/notification.entity';
 import { UserFcmToken } from '../entities/user-fcm-token.entity';
@@ -30,6 +31,7 @@ import { NotificationOutbox } from '../entities/notification-outbox.entity';
     NotificationTemplateService,
     NotificationCapService,
     GeminiTemplateService,
+    InterestNotificationService,
   ],
   exports: [PushService, NotificationTemplateService],
 })

@@ -9,6 +9,7 @@ import { OptionalJwtAuthGuard } from '../common/guards/optional-jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { Public } from '../common/decorators/public.decorator';
 import { SubscriptionPlan } from '../entities/subscription-plan.entity';
 import { CreatePlanDto, UpdatePlanDto } from './dto/plans.dto';
 
@@ -19,6 +20,7 @@ export class PlansController {
     @InjectRepository(SubscriptionPlan) private readonly planRepo: Repository<SubscriptionPlan>,
   ) {}
 
+  @Public()
   @UseGuards(OptionalJwtAuthGuard)
   @Get()
   async list(@CurrentUser() user: any) {

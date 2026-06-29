@@ -44,6 +44,11 @@ const DEFAULT_TEMPLATES: SeedTemplate[] = [
   // personalized_search — {{term}} substituted by PersonalizedNotificationService
   { type: 'personalized_search', title: '🔍 நீங்க பார்த்தது இன்னும் இருக்கு!', body: 'நீங்க பார்த்த "{{term}}" offers இன்னும் available இருக்கு. Check pannunga! 🛍️' },
   { type: 'personalized_search', title: '⏳ Miss பண்ணிடாதீங்க!', body: '"{{term}}" தேடுனீங்க, ஆனா இன்னும் book பண்ணலையே! நல்ல offers காத்திருக்கு 🎯' },
+  // interest_alert — {{category}} substituted by InterestNotificationService
+  { type: 'interest_alert', title: '🎯 {{category}} Offers உங்களுக்காக!', body: 'நீங்க love பண்ற {{category}} -இல் இன்று special deals! பாருங்க 🛍️' },
+  { type: 'interest_alert', title: '🔥 {{category}} Hot Deals!', body: '{{category}} offers இன்று trending! உங்க area-இல் இருக்கு, miss பண்ணாதீங்க ⚡' },
+  { type: 'interest_alert', title: '💡 உங்களுக்கு பிடிக்கும்!', body: '{{category}} -இல் புதிய offers வந்திருக்கு — நீங்க definitely like பண்ணுவீங்க 😍' },
+  { type: 'interest_alert', title: '📍 Near You: {{category}} Sale', body: 'Nearby shops-இல் {{category}} offers இருக்கு! இப்போதே check பண்ணுங்க 🗺️' },
 ];
 
 @Injectable()
@@ -79,5 +84,48 @@ export class NotificationTemplateService {
     await this.templateRepo.insert(DEFAULT_TEMPLATES.map((t) => ({ ...t, is_ai_generated: false })));
     this.logger.log(`seedFromDefaults: inserted ${DEFAULT_TEMPLATES.length} default templates`);
     return DEFAULT_TEMPLATES.length;
+  }
+
+  // ── Admin CRUD ──────────────────────────────────────────────────────────────
+
+  async adminList(type?: string): Promise<NotificationTemplate[]> {
+    const where = type ? { type } : {};
+    return this.templateRepo.find({ where, order: { type: 'ASC', id: 'ASC' } });
+  }
+
+  async adminCreate(data: {
+    type: string; title: string; body: string; route?: string; language?: string;
+  }): Promise<NotificationTemplate> {
+    const entity = this.templateRepo.create({
+      type: data.type,
+      title: data.title,
+      body: data.body,
+      route: data.route ?? '/feed',
+      language: data.language ?? 'ta',
+      is_ai_generated: false,
+      is_active: true,
+    });
+    return this.templateRepo.save(entity);
+  }
+
+  async adminUpdate(id: number, data: Partial<{
+    type: string; title: string; body: string; route: string; language: string; is_active: boolean;
+  }>): Promise<NotificationTemplate | null> {
+    await this.templateRepo.update(id, data);
+    return this.templateRepo.findOne({ where: { id } });
+  }
+
+  async adminDelete(id: number): Promise<void> {
+    await this.templateRepo.delete(id);
+  }
+
+  async adminStats(): Promise<Record<string, number>> {
+    const rows = await this.templateRepo
+      .createQueryBuilder('t')
+      .select('t.type', 'type')
+      .addSelect('COUNT(*)', 'cnt')
+      .groupBy('t.type')
+      .getRawMany();
+    return Object.fromEntries(rows.map((r) => [r.type, Number(r.cnt)]));
   }
 }
