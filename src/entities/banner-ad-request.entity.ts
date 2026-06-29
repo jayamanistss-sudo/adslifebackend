@@ -8,8 +8,14 @@ export class BannerAdRequest {
   @Column({ type: 'int' })
   vendor_id: number;
 
+  @Column({ type: 'varchar', length: 150, nullable: true })
+  title: string | null;
+
   @Column({ type: 'text' })
   image_url: string;
+
+  @Column({ type: 'varchar', length: 10, default: 'image' })
+  media_type: string;
 
   @Column({ type: 'varchar', length: 500, nullable: true })
   target_url: string | null;
@@ -19,6 +25,12 @@ export class BannerAdRequest {
 
   @Column({ type: 'int', default: 7 })
   duration_days: number;
+
+  @Column({ type: 'int', nullable: true })
+  banner_plan_id: number | null;
+
+  @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
+  price: number | null;
 
   @Column({ type: 'varchar', length: 20, default: 'pending' })
   status: string;

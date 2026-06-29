@@ -5,19 +5,20 @@ import {
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { IsString, IsNotEmpty, IsNumber, IsOptional, IsIn, MaxLength, Min, IsBoolean } from 'class-validator';
+import { IsString, IsNotEmpty, IsNumber, IsOptional, MaxLength, Min, IsBoolean } from 'class-validator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { Public } from '../common/decorators/public.decorator';
 import { BannerPlan } from '../entities/banner-plan.entity';
 
+// Top Banner is currently the only live placement on the site — position is
+// fixed and not vendor/admin-selectable until more placements exist.
 class CreateBannerPlanDto {
   @IsString() @IsNotEmpty() @MaxLength(100) name!: string;
   @IsNumber() @Min(1) duration_days!: number;
   @IsNumber() @Min(0) price!: number;
   @IsOptional() @IsString() @MaxLength(200) description?: string;
-  @IsOptional() @IsString() @IsIn(['top', 'mid', 'bottom', 'any']) position?: string;
 }
 
 class UpdateBannerPlanDto {
@@ -25,7 +26,6 @@ class UpdateBannerPlanDto {
   @IsOptional() @IsNumber() @Min(1) duration_days?: number;
   @IsOptional() @IsNumber() @Min(0) price?: number;
   @IsOptional() @IsString() @MaxLength(200) description?: string;
-  @IsOptional() @IsString() @IsIn(['top', 'mid', 'bottom', 'any']) position?: string;
   @IsOptional() @IsBoolean() is_active?: boolean;
 }
 
@@ -65,7 +65,7 @@ export class BannerPlansController {
       duration_days: dto.duration_days,
       price: dto.price,
       description: dto.description ?? null,
-      position: dto.position ?? 'any',
+      position: 'top',
       is_active: true,
     });
     return { success: true, data: plan };
@@ -81,7 +81,6 @@ export class BannerPlansController {
     if (dto.duration_days !== undefined) patch.duration_days = dto.duration_days;
     if (dto.price         !== undefined) patch.price         = dto.price as any;
     if (dto.description   !== undefined) patch.description   = dto.description ?? null;
-    if (dto.position      !== undefined) patch.position      = dto.position;
     if (dto.is_active     !== undefined) patch.is_active     = dto.is_active;
     await this.repo.update(id, patch);
     const data = await this.repo.findOne({ where: { id } });

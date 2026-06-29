@@ -32,6 +32,25 @@ function detectMime(buf: Buffer): string | null {
 const UPLOAD_DIR = join(process.cwd(), 'uploads', 'images');
 if (!existsSync(UPLOAD_DIR)) mkdirSync(UPLOAD_DIR, { recursive: true });
 
+const ALLOWED_VIDEO_MIMES: Record<string, string> = {
+  'video/mp4':  'mp4',
+  'video/webm': 'webm',
+};
+const MAX_VIDEO_SIZE = 50 * 1024 * 1024;
+
+/** Detect real video MIME type from magic bytes */
+function detectVideoMime(buf: Buffer): string | null {
+  if (buf.length < 12) return null;
+  // MP4/MOV: box size (4 bytes) + 'ftyp'
+  if (buf[4] === 0x66 && buf[5] === 0x74 && buf[6] === 0x79 && buf[7] === 0x70) return 'video/mp4';
+  // WebM/MKV: EBML header
+  if (buf[0] === 0x1a && buf[1] === 0x45 && buf[2] === 0xdf && buf[3] === 0xa3) return 'video/webm';
+  return null;
+}
+
+const VIDEO_UPLOAD_DIR = join(process.cwd(), 'uploads', 'videos');
+if (!existsSync(VIDEO_UPLOAD_DIR)) mkdirSync(VIDEO_UPLOAD_DIR, { recursive: true });
+
 @ApiTags('upload')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
@@ -81,6 +100,53 @@ export class UploadController {
     // Build public URL — prefer API_BASE_URL, fall back to APP_URL, then localhost
     const baseUrl = (process.env.API_BASE_URL ?? process.env.APP_URL ?? `http://localhost:${process.env.PORT ?? 3001}`).replace(/\/$/, '');
     const url = `${baseUrl}/uploads/images/${filename}`;
+
+    return {
+      success: true,
+      data: { url, size: file.size, format: ext },
+    };
+  }
+
+  @Post('video')
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        video: { type: 'string', format: 'binary', description: 'MP4 or WebM — max 50MB' },
+      },
+      required: ['video'],
+    },
+  })
+  @UseInterceptors(
+    FileInterceptor('video', {
+      storage: memoryStorage(),
+      limits: { fileSize: MAX_VIDEO_SIZE },
+      fileFilter: (_req, file, cb) => {
+        if (!ALLOWED_VIDEO_MIMES[file.mimetype]) {
+          return cb(new BadRequestException('Only MP4 or WebM allowed'), false);
+        }
+        cb(null, true);
+      },
+    }),
+  )
+  async uploadVideo(@UploadedFile() file: Express.Multer.File) {
+    if (!file) throw new BadRequestException('No video uploaded');
+
+    const realMime = detectVideoMime(file.buffer);
+    if (!realMime || !ALLOWED_VIDEO_MIMES[realMime]) {
+      throw new BadRequestException('Only MP4 or WebM allowed');
+    }
+
+    const ext = ALLOWED_VIDEO_MIMES[realMime];
+    const filename = `${randomUUID()}.${ext}`;
+    const dest = join(VIDEO_UPLOAD_DIR, filename);
+
+    const { writeFileSync } = await import('node:fs');
+    writeFileSync(dest, file.buffer);
+
+    const baseUrl = (process.env.API_BASE_URL ?? process.env.APP_URL ?? `http://localhost:${process.env.PORT ?? 3001}`).replace(/\/$/, '');
+    const url = `${baseUrl}/uploads/videos/${filename}`;
 
     return {
       success: true,
