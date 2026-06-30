@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsNumber, IsInt, Min } from 'class-validator';
+import { IsString, IsOptional, IsNumber, IsInt, Min, IsArray } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class CreateOfferDto {
@@ -16,6 +16,11 @@ export class CreateOfferDto {
   @IsOptional()
   @IsString()
   image_url?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  images?: string[];
 
   @IsOptional()
   @IsString()

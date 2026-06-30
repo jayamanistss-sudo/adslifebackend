@@ -63,6 +63,7 @@ export class OffersService {
       original_price: dto.original_price ?? null,
       offer_price: dto.offer_price ?? null,
       image_url: dto.image_url?.trim() || null,
+      images: dto.images ?? null,
       coupon_code: dto.coupon_code?.trim() || null,
       redeem_url: dto.redeem_url?.trim() || null,
       max_redemptions: dto.max_redemptions ?? 0,
@@ -128,6 +129,7 @@ export class OffersService {
     if (dto.description !== undefined)               updateData.description = trimOrNull(dto.description);
     if (dto.category?.trim())                        updateData.category = dto.category.trim();
     if (dto.image_url !== undefined)                 updateData.image_url = trimOrNull(dto.image_url);
+    if (dto.images !== undefined)                    (updateData as any).images = dto.images ?? null;
     if (dto.coupon_code !== undefined)               updateData.coupon_code = trimOrNull(dto.coupon_code);
     if (dto.redeem_url !== undefined)                updateData.redeem_url = trimOrNull(dto.redeem_url);
     if (dto.discount_percent !== undefined)          updateData.discount_percent = dto.discount_percent;

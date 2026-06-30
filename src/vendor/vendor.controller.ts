@@ -3,6 +3,8 @@ import {
   UseGuards, Query,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiBody } from '@nestjs/swagger';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import { VendorService } from './vendor.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -10,13 +12,19 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Public } from '../common/decorators/public.decorator';
 import { UpdateVendorProfileDto } from './dto/vendor.dto';
+import { Offer } from '../entities/offer.entity';
+import { OfferReview } from '../entities/offer-review.entity';
 
 @ApiTags('vendor')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('vendor')
 export class VendorController {
-  constructor(private readonly vendorService: VendorService) {}
+  constructor(
+    private readonly vendorService: VendorService,
+    @InjectRepository(Offer) private readonly offerRepo: Repository<Offer>,
+    @InjectRepository(OfferReview) private readonly reviewRepo: Repository<OfferReview>,
+  ) {}
 
   @Roles('vendor', 'admin')
   @Get('dashboard')
@@ -98,6 +106,38 @@ export class VendorController {
   async budgetSuggest(@CurrentUser() user: any) {
     const data = await this.vendorService.budgetSuggest(user.user_id);
     return { success: true, data };
+  }
+
+  @Roles('vendor', 'admin')
+  @Get('reviews')
+  async myReviews(@CurrentUser() user: any, @Query('page') page = '1') {
+    const vendor = await this.vendorService.getMyVendorId(user.user_id);
+    if (!vendor) return { success: true, data: [] };
+    const offerIds = await this.offerRepo
+      .find({ where: { vendor_id: vendor }, select: ['id', 'title'] });
+    if (!offerIds.length) return { success: true, data: [] };
+    const idList = offerIds.map((o) => o.id);
+    const titleMap = new Map(offerIds.map((o) => [o.id, o.title]));
+    const perPage = 20;
+    const skip = (Number(page) - 1) * perPage;
+    const reviews = await this.reviewRepo
+      .createQueryBuilder('r')
+      .innerJoin('users', 'u', 'u.id = r.user_id')
+      .select([
+        'r.id AS id', 'r.offer_id AS "offerId"', 'r.rating AS rating',
+        'r.comment AS comment', 'r.created_at AS "createdAt"',
+        'u.name AS "userName"', 'u.avatar_url AS "userAvatar"',
+      ])
+      .where('r.offer_id IN (:...ids)', { ids: idList })
+      .orderBy('r.created_at', 'DESC')
+      .offset(skip).limit(perPage)
+      .getRawMany();
+    const total = await this.reviewRepo
+      .createQueryBuilder('r')
+      .where('r.offer_id IN (:...ids)', { ids: idList })
+      .getCount();
+    const data = reviews.map((r) => ({ ...r, offerTitle: titleMap.get(Number(r.offerId)) ?? '' }));
+    return { success: true, data, total };
   }
 
   @Roles('vendor', 'admin')

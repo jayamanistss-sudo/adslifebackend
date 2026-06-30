@@ -154,6 +154,11 @@ export class VendorService {
     };
   }
 
+  async getMyVendorId(userId: number): Promise<number | null> {
+    const v = await this.vendorRepo.findOne({ where: { user_id: userId }, select: ['id'] });
+    return v?.id ?? null;
+  }
+
   async getMyProfile(userId: number) {
     const vendor = await this.vendorRepo
       .createQueryBuilder('v')

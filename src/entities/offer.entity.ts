@@ -26,6 +26,9 @@ export class Offer {
   @Column({ type: 'text', nullable: true })
   image_url: string | null;
 
+  @Column({ type: 'simple-json', nullable: true })
+  images: string[] | null;
+
   @Column({ type: 'varchar', length: 100, nullable: true })
   coupon_code: string | null;
 
