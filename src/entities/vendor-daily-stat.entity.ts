@@ -2,9 +2,11 @@ import {
   Entity,
   PrimaryGeneratedColumn,
   Column,
+  Unique,
 } from 'typeorm';
 
 @Entity('vendor_daily_stats')
+@Unique(['vendor_id', 'stat_date'])
 export class VendorDailyStat {
   @PrimaryGeneratedColumn()
   id: number;

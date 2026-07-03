@@ -165,9 +165,29 @@ export class AuthController {
   @Put('profile')
   async updateProfile(
     @CurrentUser() user: any,
-    @Body() dto: { name?: string; phone?: string; city?: string; avatar_url?: string },
+    @Body() dto: { name?: string; phone?: string; city?: string; avatar_url?: string; email_alerts?: boolean },
   ) {
     const data = await this.authService.updateProfile(user.user_id, dto);
+    return { success: true, data };
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  @Post('email-change/request')
+  @HttpCode(HttpStatus.OK)
+  async requestEmailChange(@CurrentUser() user: any, @Body('new_email') newEmail: string) {
+    const data = await this.authService.requestEmailChange(user.user_id, newEmail);
+    return { success: true, data };
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @Throttle({ default: { limit: 8, ttl: 60000 } })
+  @Post('email-change/confirm')
+  @HttpCode(HttpStatus.OK)
+  async confirmEmailChange(@CurrentUser() user: any, @Body('otp') otp: string) {
+    const data = await this.authService.confirmEmailChange(user.user_id, otp);
     return { success: true, data };
   }
 

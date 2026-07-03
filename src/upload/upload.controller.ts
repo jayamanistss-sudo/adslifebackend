@@ -5,10 +5,8 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiTags, ApiBearerAuth, ApiConsumes, ApiBody } from '@nestjs/swagger';
 import { memoryStorage } from 'multer';
-import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync } from 'node:fs';
-import { join } from 'node:path';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { uploadBufferToCloudinary } from './cloudinary';
 
 const ALLOWED_MIMES: Record<string, string> = {
   'image/jpeg': 'jpg',
@@ -29,9 +27,6 @@ function detectMime(buf: Buffer): string | null {
   return null;
 }
 
-const UPLOAD_DIR = join(process.cwd(), 'uploads', 'images');
-if (!existsSync(UPLOAD_DIR)) mkdirSync(UPLOAD_DIR, { recursive: true });
-
 const ALLOWED_VIDEO_MIMES: Record<string, string> = {
   'video/mp4':  'mp4',
   'video/webm': 'webm',
@@ -47,9 +42,6 @@ function detectVideoMime(buf: Buffer): string | null {
   if (buf[0] === 0x1a && buf[1] === 0x45 && buf[2] === 0xdf && buf[3] === 0xa3) return 'video/webm';
   return null;
 }
-
-const VIDEO_UPLOAD_DIR = join(process.cwd(), 'uploads', 'videos');
-if (!existsSync(VIDEO_UPLOAD_DIR)) mkdirSync(VIDEO_UPLOAD_DIR, { recursive: true });
 
 @ApiTags('upload')
 @ApiBearerAuth()
@@ -69,7 +61,7 @@ export class UploadController {
   })
   @UseInterceptors(
     FileInterceptor('image', {
-      // Use memory storage so we can validate magic bytes before writing to disk
+      // Use memory storage so we can validate magic bytes before uploading
       storage: memoryStorage(),
       limits: { fileSize: MAX_SIZE },
       fileFilter: (_req, file, cb) => {
@@ -89,21 +81,14 @@ export class UploadController {
       throw new BadRequestException('Only JPEG, PNG, WebP, GIF allowed');
     }
 
-    const ext = ALLOWED_MIMES[realMime];
-    const filename = `${randomUUID()}.${ext}`;
-    const dest = join(UPLOAD_DIR, filename);
-
-    // Write validated buffer to disk
-    const { writeFileSync } = await import('node:fs');
-    writeFileSync(dest, file.buffer);
-
-    // Build public URL — prefer API_BASE_URL, fall back to APP_URL, then localhost
-    const baseUrl = (process.env.API_BASE_URL ?? process.env.APP_URL ?? `http://localhost:${process.env.PORT ?? 3001}`).replace(/\/$/, '');
-    const url = `${baseUrl}/uploads/images/${filename}`;
+    const result = await uploadBufferToCloudinary(file.buffer, {
+      folder: 'adslife/images',
+      resource_type: 'image',
+    });
 
     return {
       success: true,
-      data: { url, size: file.size, format: ext },
+      data: { url: result.secure_url, size: result.bytes, format: result.format },
     };
   }
 
@@ -138,19 +123,14 @@ export class UploadController {
       throw new BadRequestException('Only MP4 or WebM allowed');
     }
 
-    const ext = ALLOWED_VIDEO_MIMES[realMime];
-    const filename = `${randomUUID()}.${ext}`;
-    const dest = join(VIDEO_UPLOAD_DIR, filename);
-
-    const { writeFileSync } = await import('node:fs');
-    writeFileSync(dest, file.buffer);
-
-    const baseUrl = (process.env.API_BASE_URL ?? process.env.APP_URL ?? `http://localhost:${process.env.PORT ?? 3001}`).replace(/\/$/, '');
-    const url = `${baseUrl}/uploads/videos/${filename}`;
+    const result = await uploadBufferToCloudinary(file.buffer, {
+      folder: 'adslife/videos',
+      resource_type: 'video',
+    });
 
     return {
       success: true,
-      data: { url, size: file.size, format: ext },
+      data: { url: result.secure_url, size: result.bytes, format: result.format },
     };
   }
 }

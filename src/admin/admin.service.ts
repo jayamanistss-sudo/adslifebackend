@@ -378,29 +378,30 @@ export class AdminService {
   async syncDailyStats(targetDate?: string) {
     const date = targetDate ?? new Date(Date.now() - 86400000).toISOString().slice(0, 10);
 
-    await this.dataSource
-      .createQueryBuilder()
-      .insert()
-      .into(VendorDailyStat)
-      .values(
-        this.dataSource
-          .createQueryBuilder()
-          .select([
-            'o.vendor_id AS vendor_id',
-            ':date AS stat_date',
-            "COALESCE(SUM(CASE WHEN ui.action = 'view'   THEN 1 ELSE 0 END), 0) AS impressions",
-            "COALESCE(SUM(CASE WHEN ui.action = 'click'  THEN 1 ELSE 0 END), 0) AS clicks",
-            "COALESCE(SUM(CASE WHEN ui.action = 'save'   THEN 1 ELSE 0 END), 0) AS saves",
-            "COALESCE(SUM(CASE WHEN ui.action = 'redeem' THEN 1 ELSE 0 END), 0) AS redemptions",
-          ])
-          .from(UserInteraction, 'ui')
-          .innerJoin(Offer, 'o', 'o.id = ui.offer_id')
-          .where('ui.created_at::date = :date', { date })
-          .groupBy('o.vendor_id') as any,
-      )
-      .orUpdate(['impressions', 'clicks', 'saves', 'redemptions'], ['vendor_id', 'stat_date'])
-      .setParameter('date', date)
-      .execute();
+    // TypeORM's InsertQueryBuilder doesn't reliably support INSERT ... SELECT
+    // combined with .orUpdate() (the subquery's columns don't map onto the
+    // conflict target correctly) — plain SQL is the right tool for this
+    // INSERT-SELECT upsert.
+    await this.dataSource.query(
+      `INSERT INTO vendor_daily_stats (vendor_id, stat_date, impressions, clicks, saves, redemptions)
+       SELECT
+         o.vendor_id,
+         $1::date,
+         COALESCE(SUM(CASE WHEN ui.action = 'view'   THEN 1 ELSE 0 END), 0),
+         COALESCE(SUM(CASE WHEN ui.action = 'click'  THEN 1 ELSE 0 END), 0),
+         COALESCE(SUM(CASE WHEN ui.action = 'save'   THEN 1 ELSE 0 END), 0),
+         COALESCE(SUM(CASE WHEN ui.action = 'redeem' THEN 1 ELSE 0 END), 0)
+       FROM user_interactions ui
+       INNER JOIN offers o ON o.id = ui.offer_id
+       WHERE ui.created_at::date = $1::date
+       GROUP BY o.vendor_id
+       ON CONFLICT (vendor_id, stat_date) DO UPDATE SET
+         impressions = EXCLUDED.impressions,
+         clicks = EXCLUDED.clicks,
+         saves = EXCLUDED.saves,
+         redemptions = EXCLUDED.redemptions`,
+      [date],
+    );
 
     const affected = await this.dailyStatRepo.count({ where: { stat_date: date as any } });
     return { synced: true, date, vendor_rows: affected };

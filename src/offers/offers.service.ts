@@ -9,9 +9,11 @@ import { Repository } from 'typeorm';
 import { CreateOfferDto, UpdateOfferDto } from './dto/create-offer.dto';
 import { PushService } from '../services/push.service';
 import { NotificationsGateway } from '../gateway/notifications.gateway';
+import { MailService } from '../mail/mail.service';
 import { Offer } from '../entities/offer.entity';
 import { Vendor } from '../entities/vendor.entity';
 import { VendorFollower } from '../entities/vendor-follower.entity';
+import { User } from '../entities/user.entity';
 import { SubscriptionPlan } from '../entities/subscription-plan.entity';
 import { OfferReviewsService } from './offer-reviews.service';
 
@@ -21,9 +23,11 @@ export class OffersService {
     @InjectRepository(Offer) private readonly offerRepo: Repository<Offer>,
     @InjectRepository(Vendor) private readonly vendorRepo: Repository<Vendor>,
     @InjectRepository(VendorFollower) private readonly vendorFollowerRepo: Repository<VendorFollower>,
+    @InjectRepository(User) private readonly userRepo: Repository<User>,
     @InjectRepository(SubscriptionPlan) private readonly planRepo: Repository<SubscriptionPlan>,
     private readonly push: PushService,
     private readonly gateway: NotificationsGateway,
+    private readonly mail: MailService,
     private readonly offerReviewsService: OfferReviewsService,
   ) {}
 
@@ -105,6 +109,18 @@ export class OffersService {
       offer_id:  String(offerId),
       vendor_id: String(vendorId),
     });
+
+    // Email alerts: find subscribers who have email_alerts enabled
+    const users = await this.userRepo.find({
+      where: userIds.map(id => ({ id })),
+      select: ['id', 'name', 'email', 'email_alerts'] as any,
+    });
+    const emailPromises = users
+      .filter((u: any) => u.email_alerts !== false)
+      .map((u: any) =>
+        this.mail.sendNewOfferEmail(u.email, u.name, vendor.business_name, title, offerId, discountPercent),
+      );
+    await Promise.allSettled(emailPromises);
   }
 
   async update(userId: number, offerId: number, dto: UpdateOfferDto, role: string) {
@@ -172,6 +188,7 @@ export class OffersService {
         'o.original_price AS "originalPrice"',
         'o.offer_price AS "offerPrice"',
         'o.image_url AS "imageUrl"',
+        'o.images AS images',
         'o.coupon_code AS "couponCode"',
         'o.redeem_url AS "redeemUrl"',
         'o.max_redemptions AS "maxRedemptions"',
@@ -206,6 +223,11 @@ export class OffersService {
     const offer = await qb.getRawOne();
     if (!offer) throw new NotFoundException('Offer not found');
     const toNum = (v: any) => (v == null ? null : Number.parseFloat(v));
+    const parseImages = (v: any): string[] | null => {
+      if (Array.isArray(v)) return v;
+      if (typeof v === 'string') { try { return JSON.parse(v); } catch { return null; } }
+      return null;
+    };
 
     const { avgRating, reviewCount } = await this.offerReviewsService.getAggregate(offerId);
     const myReview = userId ? await this.offerReviewsService.getMine(offerId, userId) : null;
@@ -218,6 +240,7 @@ export class OffersService {
       vendorLat:       toNum(offer.vendorLat),
       vendorLng:       toNum(offer.vendorLng),
       isSaved:         Boolean(offer.isSaved),
+      images:          parseImages(offer.images),
       avgRating,
       reviewCount,
       myReview: myReview ? { rating: myReview.rating, comment: myReview.comment } : null,

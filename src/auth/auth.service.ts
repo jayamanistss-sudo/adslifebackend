@@ -26,6 +26,8 @@ import { Vendor } from '../entities/vendor.entity';
 import { UserPreference } from '../entities/user-preference.entity';
 import { PasswordReset } from '../entities/password-reset.entity';
 import { UserLocation } from '../entities/user-location.entity';
+import { EmailChangeRequest } from '../entities/email-change-request.entity';
+import { SubscriptionPlan } from '../entities/subscription-plan.entity';
 
 @Injectable()
 export class AuthService {
@@ -35,6 +37,8 @@ export class AuthService {
     @InjectRepository(UserPreference) private readonly userPrefRepo: Repository<UserPreference>,
     @InjectRepository(PasswordReset) private readonly passwordResetRepo: Repository<PasswordReset>,
     @InjectRepository(UserLocation) private readonly userLocationRepo: Repository<UserLocation>,
+    @InjectRepository(EmailChangeRequest) private readonly emailChangeRepo: Repository<EmailChangeRequest>,
+    @InjectRepository(SubscriptionPlan) private readonly planRepo: Repository<SubscriptionPlan>,
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
@@ -199,12 +203,29 @@ export class AuthService {
     const existing = await this.vendorRepo.findOne({ where: { user_id: userId }, select: ['id'] });
     if (existing) throw new ConflictException('Already a vendor');
 
+    // Requested plan is recorded but not activated (plan_expires_at stays
+    // unset) — no payment is collected on this endpoint, so the admin
+    // confirms/adjusts the plan during vendor review.
+    let planSlug: string | null = null;
+    if (dto.plan_id != null) {
+      const plan = await this.planRepo.findOne({ where: { id: dto.plan_id }, select: ['slug'] });
+      planSlug = plan?.slug ?? null;
+    }
+
     await this.vendorRepo.save({
       user_id: userId,
       business_name: dto.business_name,
-      category: dto.category || null,
+      category: dto.category || dto.business_type || null,
       city: dto.city || null,
+      address: dto.address || null,
       phone: dto.phone || null,
+      website: dto.website || null,
+      gst_number: dto.gst_number || null,
+      description: dto.description || null,
+      logo_url: dto.logo_url || null,
+      lat: dto.lat ?? null,
+      lng: dto.lng ?? null,
+      subscription_plan: planSlug ?? 'free',
       status: 'pending_review' as any,
     });
     await this.userRepo.update(userId, { role: 'vendor' as any });
@@ -257,23 +278,23 @@ export class AuthService {
   async getMe(userId: number) {
     const user = await this.userRepo.findOne({
       where: { id: userId },
-      select: ['id', 'name', 'email', 'phone', 'city', 'avatar_url', 'role'],
+      select: ['id', 'name', 'email', 'phone', 'city', 'avatar_url', 'role', 'email_alerts'],
     });
     if (!user) throw new NotFoundException('User not found');
     return user;
   }
 
-  async updateProfile(userId: number, dto: { name?: string; phone?: string; city?: string; avatar_url?: string }) {
-    const allowed = ['name', 'phone', 'city', 'avatar_url'] as const;
+  async updateProfile(userId: number, dto: { name?: string; phone?: string; city?: string; avatar_url?: string; email_alerts?: boolean }) {
+    const allowed = ['name', 'phone', 'city', 'avatar_url', 'email_alerts'] as const;
     const updateData: Partial<User> = {};
     for (const key of allowed) {
-      if (dto[key] !== undefined) updateData[key] = dto[key] as any;
+      if (dto[key] !== undefined) (updateData as any)[key] = dto[key];
     }
     if (!Object.keys(updateData).length) return { updated: false };
     await this.userRepo.update(userId, updateData);
     const user = await this.userRepo.findOne({
       where: { id: userId },
-      select: ['id', 'name', 'email', 'phone', 'city', 'avatar_url', 'role'],
+      select: ['id', 'name', 'email', 'phone', 'city', 'avatar_url', 'role', 'email_alerts'] as any,
     });
     if (!user) throw new NotFoundException('User not found');
     return user;
@@ -320,6 +341,56 @@ export class AuthService {
       action: 'logout', ipAddress: ctx?.ip ?? '0.0.0.0', userAgent: ctx?.ua,
     }).catch(() => {}));
     return { message: 'Logged out successfully' };
+  }
+
+  async requestEmailChange(userId: number, newEmail: string) {
+    const email = newEmail?.trim().toLowerCase();
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      throw new BadRequestException('Enter a valid email address');
+    }
+    const user = await this.userRepo.findOne({ where: { id: userId }, select: ['id', 'name', 'email'] });
+    if (!user) throw new NotFoundException('User not found');
+    if (email === user.email.toLowerCase()) {
+      throw new BadRequestException('That is already your current email address');
+    }
+    const taken = await this.userRepo.findOne({ where: { email }, select: ['id'] });
+    if (taken) throw new ConflictException('That email address is already in use');
+
+    await this.emailChangeRepo.update(
+      { user_id: userId, used_at: IsNull() as any },
+      { used_at: new Date() },
+    );
+
+    const otp = String(crypto.randomInt(100000, 1000000));
+    const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
+    await this.emailChangeRepo.save({ user_id: userId, new_email: email, otp, expires_at: expiresAt });
+
+    setImmediate(() => this.mail.sendEmailChangeOtp(email, user.name, otp));
+
+    return { message: `Verification code sent to ${email}` };
+  }
+
+  async confirmEmailChange(userId: number, otp: string) {
+    if (!otp) throw new BadRequestException('Enter the verification code');
+    const request = await this.emailChangeRepo.findOne({
+      where: { user_id: userId, otp: String(otp).trim(), used_at: IsNull() as any, expires_at: MoreThan(new Date()) },
+      order: { id: 'DESC' },
+    });
+    if (!request) throw new BadRequestException('Invalid or expired verification code');
+
+    const taken = await this.userRepo.findOne({ where: { email: request.new_email }, select: ['id'] });
+    if (taken) throw new ConflictException('That email address is already in use');
+
+    await this.dataSource.transaction(async (manager) => {
+      await manager.getRepository(User).update(userId, { email: request.new_email });
+      await manager.getRepository(EmailChangeRequest).update(request.id, { used_at: new Date() });
+    });
+
+    const user = await this.userRepo.findOne({
+      where: { id: userId },
+      select: ['id', 'name', 'email', 'phone', 'city', 'avatar_url', 'role'],
+    });
+    return user;
   }
 
   generateToken(userId: number, role: string): string {

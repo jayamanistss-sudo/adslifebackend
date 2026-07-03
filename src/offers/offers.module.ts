@@ -6,9 +6,11 @@ import { OfferReviewsService } from './offer-reviews.service';
 import { OfferReportsService } from './offer-reports.service';
 import { PushService } from '../services/push.service';
 import { GatewayModule } from '../gateway/gateway.module';
+import { MailModule } from '../mail/mail.module';
 import { Offer } from '../entities/offer.entity';
 import { Vendor } from '../entities/vendor.entity';
 import { VendorFollower } from '../entities/vendor-follower.entity';
+import { User } from '../entities/user.entity';
 import { UserFcmToken } from '../entities/user-fcm-token.entity';
 import { Notification } from '../entities/notification.entity';
 import { OfferReview } from '../entities/offer-review.entity';
@@ -19,8 +21,9 @@ import { SubscriptionPlan } from '../entities/subscription-plan.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Offer, Vendor, VendorFollower, UserFcmToken, Notification, OfferReview, OfferReport, FraudFlag, NotificationOutbox, SubscriptionPlan]),
+    TypeOrmModule.forFeature([Offer, Vendor, VendorFollower, User, UserFcmToken, Notification, OfferReview, OfferReport, FraudFlag, NotificationOutbox, SubscriptionPlan]),
     GatewayModule,
+    MailModule,
   ],
   controllers: [OffersController],
   providers: [OffersService, PushService, OfferReviewsService, OfferReportsService],

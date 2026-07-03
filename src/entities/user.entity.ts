@@ -70,4 +70,7 @@ export class User {
 
   @Column({ type: 'bigint', nullable: true })
   token_invalidated_at: number | null;
+
+  @Column({ type: 'boolean', default: true })
+  email_alerts: boolean;
 }

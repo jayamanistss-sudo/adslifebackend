@@ -61,6 +61,34 @@ export class MailService {
     }
   }
 
+  async sendEmailChangeOtp(toEmail: string, name: string, otp: string): Promise<void> {
+    const html = `
+      <div style="font-family:sans-serif;max-width:520px;margin:0 auto;padding:24px;background:#f9f9f9;">
+        <div style="background:#FF6200;padding:20px 24px;border-radius:12px 12px 0 0;text-align:center;">
+          <h1 style="color:#fff;margin:0;font-size:24px;">AdsLife</h1>
+          <p style="color:#ffe0cc;margin:4px 0 0;font-size:13px;">Discover · Earn · Win</p>
+        </div>
+        <div style="background:#fff;padding:24px;border-radius:0 0 12px 12px;border:1px solid #eee;">
+          <p style="font-size:16px;color:#333;">Hi <strong>${name}</strong>,</p>
+          <p style="color:#555;font-size:14px;line-height:1.6;">
+            Use the code below to confirm this is your new email address. It expires in 15 minutes.
+          </p>
+          <div style="background:#fff8f4;border:1px solid #ffe0cc;border-radius:10px;padding:18px;margin:20px 0;text-align:center;">
+            <span style="font-size:32px;font-weight:700;letter-spacing:8px;color:#FF6200;">${otp}</span>
+          </div>
+          <p style="color:#aaa;font-size:11px;text-align:center;">
+            Didn't request this? You can safely ignore this email.
+          </p>
+        </div>
+      </div>`;
+
+    try {
+      await this.send(toEmail, `${otp} is your AdsLife verification code`, html);
+    } catch (err: any) {
+      this.logger.warn(`Email change OTP failed for ${toEmail}: ${err.message}`);
+    }
+  }
+
   async sendVendorApprovedEmail(toEmail: string, name: string, businessName: string): Promise<void> {
     const appUrl = process.env.APP_URL || 'https://adslife.in';
     const loginUrl = `${appUrl}/login`;
@@ -128,6 +156,41 @@ export class MailService {
       await this.send(toEmail, 'Your AdsLife vendor application is approved! 🎉', html);
     } catch (err: any) {
       this.logger.warn(`Vendor approved email failed for ${toEmail}: ${err.message}`);
+    }
+  }
+
+  async sendNewOfferEmail(toEmail: string, userName: string, businessName: string, offerTitle: string, offerId: number, discountPercent?: number): Promise<void> {
+    const appUrl = process.env.APP_URL || 'https://adslife.in';
+    const offerUrl = `${appUrl}/offer/${offerId}`;
+    const discount = discountPercent ? ` — <strong>${discountPercent}% OFF</strong>` : '';
+    const html = `
+      <div style="font-family:sans-serif;max-width:520px;margin:0 auto;padding:24px;background:#f9f9f9;">
+        <div style="background:#FF6200;padding:20px 24px;border-radius:12px 12px 0 0;text-align:center;">
+          <h1 style="color:#fff;margin:0;font-size:24px;">AdsLife</h1>
+          <p style="color:#ffe0cc;margin:4px 0 0;font-size:13px;">Discover · Earn · Win</p>
+        </div>
+        <div style="background:#fff;padding:24px;border-radius:0 0 12px 12px;border:1px solid #eee;">
+          <p style="font-size:15px;color:#333;">Hi <strong>${userName}</strong>,</p>
+          <p style="color:#555;font-size:14px;line-height:1.6;">
+            <strong>${businessName}</strong>, a shop you follow, just posted a new offer:
+          </p>
+          <div style="background:#fff8f4;border:1px solid #ffe0cc;border-radius:10px;padding:16px 20px;margin:16px 0;">
+            <p style="color:#FF6200;font-size:16px;font-weight:700;margin:0;">${offerTitle}${discount}</p>
+          </div>
+          <a href="${offerUrl}" style="display:block;text-align:center;background:#FF6200;color:#fff;padding:14px;border-radius:10px;text-decoration:none;font-size:16px;font-weight:600;margin:20px 0;">
+            View Offer
+          </a>
+          <p style="color:#aaa;font-size:11px;text-align:center;">
+            You're receiving this because you subscribed to ${businessName} on AdsLife.<br>
+            Open the app → Settings → Notifications to manage email alerts.
+          </p>
+        </div>
+      </div>`;
+
+    try {
+      await this.send(toEmail, `New offer from ${businessName}: ${offerTitle}`, html);
+    } catch (err: any) {
+      this.logger.warn(`New offer email failed for ${toEmail}: ${err.message}`);
     }
   }
 

@@ -206,4 +206,6 @@ export class SiteSettingsDto {
   @ApiPropertyOptional({ enum: ['0', '1'] }) @IsOptional() @IsIn(['0', '1']) maintenance_mode?: string;
   @ApiPropertyOptional({ enum: ['0', '1'] }) @IsOptional() @IsIn(['0', '1']) coins_enabled?: string;
   @ApiPropertyOptional({ enum: ['0', '1'] }) @IsOptional() @IsIn(['0', '1']) spin_enabled?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() terms_content?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() privacy_content?: string;
 }

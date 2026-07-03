@@ -13,6 +13,8 @@ import { Vendor } from '../entities/vendor.entity';
 import { UserPreference } from '../entities/user-preference.entity';
 import { PasswordReset } from '../entities/password-reset.entity';
 import { UserLocation } from '../entities/user-location.entity';
+import { EmailChangeRequest } from '../entities/email-change-request.entity';
+import { SubscriptionPlan } from '../entities/subscription-plan.entity';
 
 @Module({
   imports: [
@@ -27,7 +29,7 @@ import { UserLocation } from '../entities/user-location.entity';
         },
       }),
     }),
-    TypeOrmModule.forFeature([User, Vendor, UserPreference, PasswordReset, UserLocation]),
+    TypeOrmModule.forFeature([User, Vendor, UserPreference, PasswordReset, UserLocation, EmailChangeRequest, SubscriptionPlan]),
     ReferralModule,
     MailModule,
   ],
