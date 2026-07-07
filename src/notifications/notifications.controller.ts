@@ -35,6 +35,12 @@ export class NotificationsController {
     return { success: true, data };
   }
 
+  @Delete('clear')
+  async clear(@CurrentUser() user: any) {
+    const data = await this.notificationsService.clearAll(user.user_id);
+    return { success: true, data };
+  }
+
   @Post('save-token')
   async saveToken(@CurrentUser() user: any, @Body() dto: SaveTokenDto) {
     if (!dto.token) return { success: true, data: null };

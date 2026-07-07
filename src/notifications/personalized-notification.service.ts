@@ -6,6 +6,7 @@ import { UserInteraction, InteractionAction } from '../entities/user-interaction
 import { PushService } from '../services/push.service';
 import { NotificationTemplateService } from './notification-template.service';
 import { NotificationCapService } from './notification-cap.service';
+import { isPrimaryInstance } from '../common/utils/cron-guard';
 
 interface Candidate {
   userId: number;
@@ -28,6 +29,7 @@ export class PersonalizedNotificationService {
   // a given search is only ever considered once (and the user has had time to act on it).
   @Cron(CronExpression.EVERY_HOUR, { name: 'personalized_search_notif', timeZone: 'Asia/Kolkata' })
   async runSearchFollowUp() {
+    if (!isPrimaryInstance()) return;
     const candidates = await this.findAbandonedSearches();
     if (!candidates.length) {
       this.logger.log('Search follow-up: no candidates');

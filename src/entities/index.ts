@@ -80,6 +80,7 @@ import { NotificationTemplate } from './notification-template.entity';
 import { OfferReview } from './offer-review.entity';
 import { OfferReport } from './offer-report.entity';
 import { NotificationOutbox } from './notification-outbox.entity';
+import { RedemptionCode } from './redemption-code.entity';
 import { EmailChangeRequest } from './email-change-request.entity';
 
 export const entities = [
@@ -124,4 +125,5 @@ export const entities = [
   OfferReport,
   NotificationOutbox,
   EmailChangeRequest,
+  RedemptionCode,
 ];

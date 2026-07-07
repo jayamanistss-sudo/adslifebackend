@@ -162,6 +162,15 @@ export class AuthController {
 
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
+  @Post('checkin')
+  @HttpCode(HttpStatus.OK)
+  async dailyCheckin(@CurrentUser() user: any) {
+    const data = await this.authService.dailyCheckin(user.user_id);
+    return { success: true, data };
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
   @Put('profile')
   async updateProfile(
     @CurrentUser() user: any,

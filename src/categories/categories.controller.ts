@@ -23,10 +23,24 @@ export class CategoriesController {
   @Get()
   async list(@CurrentUser() user: any) {
     const isAdmin = user?.role === 'admin';
-    const data = await this.categoryRepo.find({
-      where: isAdmin ? {} : { is_active: true },
-      order: { sort_order: 'ASC', name: 'ASC' },
-    });
+    // Rank by how many live offers each category has (most first), so the
+    // busiest categories surface at the top; ties fall back to sort_order.
+    const rows = await this.categoryRepo
+      .createQueryBuilder('c')
+      .leftJoin(
+        'offers',
+        'o',
+        `o.category = c.slug AND o.is_active = true AND (o.valid_until IS NULL OR o.valid_until >= NOW())`,
+      )
+      .select('c.*')
+      .addSelect('COUNT(o.id)', 'offer_count')
+      .where(isAdmin ? '1=1' : 'c.is_active = true')
+      .groupBy('c.id')
+      .orderBy('COUNT(o.id)', 'DESC')
+      .addOrderBy('c.sort_order', 'ASC')
+      .addOrderBy('c.name', 'ASC')
+      .getRawMany();
+    const data = rows.map((r) => ({ ...r, offer_count: Number(r.offer_count) }));
     return { success: true, data };
   }
 

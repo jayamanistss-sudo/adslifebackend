@@ -5,6 +5,7 @@ import { VendorService } from './vendor.service';
 import { PlanExpiryService } from './plan-expiry.service';
 import { PushService } from '../services/push.service';
 import { Vendor } from '../entities/vendor.entity';
+import { RedemptionCode } from '../entities/redemption-code.entity';
 import { VendorFollower } from '../entities/vendor-follower.entity';
 import { User } from '../entities/user.entity';
 import { Offer } from '../entities/offer.entity';
@@ -17,6 +18,7 @@ import { NotificationOutbox } from '../entities/notification-outbox.entity';
 
 @Module({
   imports: [TypeOrmModule.forFeature([
+    RedemptionCode,
     Vendor, VendorFollower, User, Offer, OfferReview, UserInteraction, SubscriptionPlan,
     UserFcmToken, Notification, NotificationOutbox,
   ])],

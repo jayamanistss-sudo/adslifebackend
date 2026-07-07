@@ -47,9 +47,9 @@ export class InteractionDto {
   @Min(1)
   offer_id: number;
 
-  @ApiProperty({ enum: ['view', 'click', 'save', 'redeem', 'share', 'skip'] })
+  @ApiProperty({ enum: ['view', 'click', 'save', 'redeem', 'share', 'skip', 'direction'] })
   @IsString()
-  @IsIn(['view', 'click', 'save', 'redeem', 'share', 'skip'])
+  @IsIn(['view', 'click', 'save', 'redeem', 'share', 'skip', 'direction'])
   action: string;
 }
 

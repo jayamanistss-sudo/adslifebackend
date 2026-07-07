@@ -178,7 +178,16 @@ export class VendorService {
       .where('v.id = :vendorId', { vendorId })
       .getRawOne();
     if (!vendor) throw new NotFoundException('Vendor not found');
-    return vendor;
+
+    // Public vendor page needs the full picture in one call
+    const [followersCount, offers] = await Promise.all([
+      this.followerRepo.count({ where: { vendor_id: vendorId } }),
+      this.offerRepo.find({
+        where: { vendor_id: vendorId, is_active: true },
+        order: { created_at: 'DESC' },
+      }),
+    ]);
+    return { ...vendor, followers_count: followersCount, offers };
   }
 
   async updateProfile(userId: number, dto: Record<string, any>) {
@@ -301,30 +310,46 @@ export class VendorService {
     });
     if (!vendor) throw new NotFoundException('Vendor profile not found');
 
-    // Fetch website content for context
+    // Fetch website content for context — pull the title, meta description and
+    // visible body text so the model actually understands the business.
     let siteText = '';
     try {
       const res = await fetch(websiteUrl, {
-        signal: AbortSignal.timeout(8000),
-        headers: { 'User-Agent': 'AdsLife-Bot/1.0' },
+        signal: AbortSignal.timeout(10000),
+        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; AdsLife-Bot/1.0)' },
       });
       const html = await res.text();
-      // Strip tags, collapse whitespace, limit to 1500 chars
-      siteText = html
+      const title = html.match(/<title[^>]*>([^<]+)<\/title>/i)?.[1]?.trim() ?? '';
+      const metaDesc = html.match(/<meta[^>]+name=["']description["'][^>]+content=["']([^"']+)["']/i)?.[1]?.trim() ?? '';
+      const ogDesc = html.match(/<meta[^>]+property=["']og:description["'][^>]+content=["']([^"']+)["']/i)?.[1]?.trim() ?? '';
+      const body = html
         .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
         .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
         .replace(/<[^>]+>/g, ' ')
+        .replace(/&[a-z]+;/gi, ' ')
         .replace(/\s+/g, ' ')
         .trim()
-        .slice(0, 1500);
+        .slice(0, 3500);
+      siteText = [
+        title && `Page title: ${title}`,
+        (metaDesc || ogDesc) && `Description: ${metaDesc || ogDesc}`,
+        body && `Content: ${body}`,
+      ].filter(Boolean).join('\n');
     } catch {
       // proceed without site content if fetch fails
     }
 
-    const systemPrompt = `You are an expert marketing copywriter for Indian local businesses.
-Generate a promotional offer for a business.
-Respond ONLY with a valid JSON object — no markdown, no explanation, no code fences.
-The JSON must have exactly these fields:
+    const systemPrompt = `You are a senior marketing strategist and copywriter for Indian local businesses.
+First ANALYSE the business from its website content and the vendor's request, then craft ONE compelling, realistic promotional offer.
+
+Rules:
+- Prices must be realistic for the specific business and the Indian market (₹). Ensure offer_price = original_price minus discount_percent, rounded to a clean number.
+- The title must be punchy and specific to THIS business (mention the actual product/service), not generic.
+- The description must sell the concrete value and include a light call-to-action.
+- Pick the single best-fitting category from the allowed list.
+- image_prompt: write a rich, photographic prompt for a professional promotional banner — describe the subject, setting, lighting, colours, composition and mood. Aim for an ad-agency-quality visual. Do NOT include any text, letters, or logos in the image description.
+
+Respond ONLY with a valid JSON object — no markdown, no explanation, no code fences — with exactly these fields:
 {
   "title": "short catchy offer title (max 80 chars)",
   "description": "compelling 2-3 sentence description of the offer",
@@ -333,7 +358,7 @@ The JSON must have exactly these fields:
   "original_price": number in INR,
   "offer_price": number in INR,
   "coupon_code": "SHORT_CODE (max 12 chars, uppercase, no spaces)",
-  "image_prompt": "a detailed prompt for generating a relevant promotional image (describe visuals, colors, style)"
+  "image_prompt": "detailed photographic prompt, no text in image"
 }`;
 
     const userMessage = `Business: ${vendor.business_name || 'Local Business'}
@@ -352,10 +377,17 @@ Generate a compelling offer JSON.`;
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userMessage },
         ],
-        model: 'openai',
+        // 'openai-large' (GPT-4o class) reasons far better about the business
+        // and produces realistic pricing vs the small default model.
+        // 'openai-fast' (GPT-OSS 20B reasoning) is the current free anonymous
+        // model; the previous 'openai-large' was removed from the legacy API
+        // and started returning 404 (which surfaced as a 400 to the vendor).
+        model: 'openai-fast',
+        temperature: 0.7,
         jsonMode: true,
       }),
-      signal: AbortSignal.timeout(30000),
+      // reasoning model can take ~20s; allow generous headroom
+      signal: AbortSignal.timeout(45000),
     });
 
     if (!pollinationsRes.ok) {
@@ -372,14 +404,31 @@ Generate a compelling offer JSON.`;
       throw new BadRequestException('AI returned invalid response, please try again');
     }
 
-    // Build Pollinations image URL from the generated image_prompt
-    const imagePrompt = offerData.image_prompt || `${offerData.title} promotional offer advertisement`;
-    const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(imagePrompt)}?width=800&height=600&nologo=true&seed=${Date.now()}`;
+    // The model doesn't always return a clean category slug — normalise it
+    // against the allowed list (fall back to the vendor's own category, then
+    // 'general') so the offer form receives a value it can actually select.
+    const allowedCategories = [
+      'it-services', 'web-and-apps', 'software', 'food-and-dining', 'fashion',
+      'electronics', 'beauty', 'travel', 'entertainment', 'grocery', 'health',
+      'sports', 'general', 'networking', 'hardware', 'cybersecurity', 'cloud', 'gaming',
+    ];
+    const rawCategory = String(offerData.category ?? '').toLowerCase().trim();
+    const normalizedCategory = allowedCategories.includes(rawCategory)
+      ? rawCategory
+      : allowedCategories.find((c) => rawCategory.includes(c) || c.includes(rawCategory))
+        ?? (vendor.category && allowedCategories.includes(vendor.category) ? vendor.category : 'general');
+
+    // Build a high-quality image URL from the generated image_prompt.
+    // 'flux' is Pollinations' best photoreal model; enhance=true lets it
+    // expand the prompt; 1024x768 (4:3) matches the offer-card crop.
+    const basePrompt = offerData.image_prompt || `${offerData.title} promotional offer advertisement`;
+    const styledPrompt = `${basePrompt}, professional advertising photography, high detail, studio lighting, vibrant, 4k, no text`;
+    const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(styledPrompt)}?width=1024&height=768&model=flux&enhance=true&nologo=true&seed=${Date.now() % 100000}`;
 
     return {
       title:            offerData.title            ?? '',
       description:      offerData.description      ?? '',
-      category:         offerData.category         ?? 'general',
+      category:         normalizedCategory,
       discount_percent: offerData.discount_percent ?? 20,
       original_price:   offerData.original_price   ?? '',
       offer_price:      offerData.offer_price       ?? '',

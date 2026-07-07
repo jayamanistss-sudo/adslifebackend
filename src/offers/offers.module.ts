@@ -8,6 +8,7 @@ import { PushService } from '../services/push.service';
 import { GatewayModule } from '../gateway/gateway.module';
 import { MailModule } from '../mail/mail.module';
 import { Offer } from '../entities/offer.entity';
+import { RedemptionCode } from '../entities/redemption-code.entity';
 import { Vendor } from '../entities/vendor.entity';
 import { VendorFollower } from '../entities/vendor-follower.entity';
 import { User } from '../entities/user.entity';
@@ -21,7 +22,7 @@ import { SubscriptionPlan } from '../entities/subscription-plan.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Offer, Vendor, VendorFollower, User, UserFcmToken, Notification, OfferReview, OfferReport, FraudFlag, NotificationOutbox, SubscriptionPlan]),
+    TypeOrmModule.forFeature([Offer, Vendor, VendorFollower, User, UserFcmToken, Notification, OfferReview, OfferReport, FraudFlag, NotificationOutbox, SubscriptionPlan, RedemptionCode]),
     GatewayModule,
     MailModule,
   ],

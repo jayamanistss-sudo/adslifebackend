@@ -41,6 +41,15 @@ export class BannerAdRequest {
   @Column({ type: 'timestamp', nullable: true })
   expires_at: Date | null;
 
+  @Column({ type: 'timestamp', nullable: true })
+  starts_at: Date | null;
+
+  @Column({ type: 'varchar', length: 64, nullable: true })
+  razorpay_order_id: string | null;
+
+  @Column({ type: 'timestamp', nullable: true })
+  paid_at: Date | null;
+
   @CreateDateColumn()
   created_at: Date;
 }

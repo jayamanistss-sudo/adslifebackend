@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { MonitoringService } from './monitoring.service';
 import { MonitoringController } from './monitoring.controller';
 import { SecurityService } from './security.service';
+import { LogRetentionService } from './log-retention.service';
 import { AuthLog } from '../entities/auth-log.entity';
 import { ActivityLog } from '../entities/activity-log.entity';
 import { ApiLog } from '../entities/api-log.entity';
@@ -20,7 +21,7 @@ import { MailModule } from '../mail/mail.module';
     MailModule,
   ],
   controllers: [MonitoringController],
-  providers: [MonitoringService, SecurityService],
+  providers: [MonitoringService, SecurityService, LogRetentionService],
   exports: [MonitoringService, SecurityService],
 })
 export class MonitoringModule {}

@@ -1,12 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, Repository, SelectQueryBuilder } from 'typeorm';
 import { Offer } from '../entities/offer.entity';
 import { UserPreference } from '../entities/user-preference.entity';
 import { SavedOffer } from '../entities/saved-offer.entity';
 import { UserInteraction, InteractionAction } from '../entities/user-interaction.entity';
 import { Vendor } from '../entities/vendor.entity';
+import { clampLimit } from '../common/utils/pagination';
 
 @Injectable()
 export class FeedService {
@@ -18,6 +19,60 @@ export class FeedService {
     @InjectDataSource() private readonly dataSource: DataSource,
   ) {}
 
+  // Fields a free-text search matches against: offer name, description,
+  // category, coupon code, vendor name, vendor category, and location
+  // (city + address). Case-insensitive.
+  private static readonly SEARCH_FIELDS = [
+    'o.title', 'o.description', 'o.category', 'o.coupon_code',
+    'v.business_name', 'v.category', 'v.city', 'v.address',
+  ];
+
+  // Build an AND-of-ORs clause: every whitespace-separated term must match at
+  // least one field, so "biryani chennai" matches a Chennai biryani offer.
+  // Returns null when the query is empty. Param names are stable so the same
+  // clause can be applied to both the data and the count query builders.
+  private buildSearchClause(search: string): { clause: string; params: Record<string, string> } | null {
+    const terms = search.trim().toLowerCase().split(/\s+/).filter(Boolean).slice(0, 6);
+    if (!terms.length) return null;
+    const params: Record<string, string> = {};
+    const clause = terms
+      .map((term, i) => {
+        const key = `q${i}`;
+        params[key] = `%${term}%`;
+        return '(' + FeedService.SEARCH_FIELDS.map((f) => `${f} ILIKE :${key}`).join(' OR ') + ')';
+      })
+      .join(' AND ');
+    return { clause, params };
+  }
+
+  // Server-side feed filters (category / distance / quick-filter) applied to
+  // both the data and count query builders. `distExpr` is the SQL haversine
+  // distance expression already built for the current lat/lng ('NULL' if none).
+  private applyFeedFilters(
+    qb: SelectQueryBuilder<any>,
+    opts: { category?: string; distanceKm?: number; filter?: string; distExpr: string },
+  ) {
+    if (opts.category) {
+      qb.andWhere('o.category = :fcat', { fcat: opts.category });
+    }
+    if (opts.distanceKm && opts.distExpr !== 'NULL') {
+      qb.andWhere(`${opts.distExpr} <= :fradius`, { fradius: opts.distanceKm });
+    }
+    switch (opts.filter) {
+      case 'flash':
+        qb.andWhere('COALESCE(o.discount_percent, 0) >= 30');
+        break;
+      case 'trending':
+        qb.andWhere('o.views > 100');
+        break;
+      case 'ending':
+        qb.andWhere("o.valid_until IS NOT NULL AND o.valid_until <= NOW() + INTERVAL '2 days'");
+        break;
+      default:
+        break; // 'all' / undefined → no extra constraint
+    }
+  }
+
   async totalActiveOffers(): Promise<number> {
     return this.offerRepo
       .createQueryBuilder('o')
@@ -28,9 +83,12 @@ export class FeedService {
       .getCount();
   }
 
-  async personalized(userId: number, lat: number, lng: number, page: number, perPage = 20, search = '') {
-    const limit = perPage;
-    const offset = (page - 1) * limit;
+  async personalized(
+    userId: number, lat: number, lng: number, page: number, perPage = 20, search = '',
+    category = '', distanceKm = 0, filter = '',
+  ) {
+    const limit = clampLimit(perPage, 20, 500);
+    const offset = (Math.max(page, 1) - 1) * limit;
 
     const prefs = await this.userPrefRepo.findOne({ where: { user_id: userId } });
     const safeJson = (v: any): any[] => { try { const p = JSON.parse(v ?? '[]'); return Array.isArray(p) ? p : []; } catch { return []; } };
@@ -39,11 +97,13 @@ export class FeedService {
     const preferredVendors: number[] = safeJson(prefs?.preferred_vendors)
       .map(Number).filter((n: number) => Number.isInteger(n) && n > 0);
 
+    // lat/lng are ParseFloatPipe-validated numbers, but bind them as query
+    // parameters anyway so this expression can never become an injection point.
     const distExpr = lat && lng
       ? `(6371 * ACOS(GREATEST(-1, LEAST(1,
-           COS(RADIANS(${lat})) * COS(RADIANS(v.lat)) *
-           COS(RADIANS(v.lng) - RADIANS(${lng})) +
-           SIN(RADIANS(${lat})) * SIN(RADIANS(v.lat))
+           COS(RADIANS(:ulat)) * COS(RADIANS(v.lat)) *
+           COS(RADIANS(v.lng) - RADIANS(:ulng)) +
+           SIN(RADIANS(:ulat)) * SIN(RADIANS(v.lat))
          ))))`
       : 'NULL';
 
@@ -98,11 +158,11 @@ export class FeedService {
       .andWhere('(o.valid_until IS NULL OR o.valid_until >= NOW())')
       .andWhere("v.status = 'approved'");
 
-    if (search) {
-      const s = `%${search}%`;
-      qb.andWhere('(o.title LIKE :s1 OR v.business_name LIKE :s2 OR o.category LIKE :s3 OR o.description LIKE :s4)',
-        { s1: s, s2: s, s3: s, s4: s });
-    }
+    if (distExpr !== 'NULL') qb.setParameters({ ulat: lat, ulng: lng });
+
+    const searchClause = this.buildSearchClause(search);
+    if (searchClause) qb.andWhere(searchClause.clause, searchClause.params);
+    this.applyFeedFilters(qb, { category, distanceKm, filter, distExpr });
 
     const countQb = this.dataSource
       .createQueryBuilder()
@@ -113,18 +173,25 @@ export class FeedService {
       .andWhere('(o.valid_until IS NULL OR o.valid_until >= NOW())')
       .andWhere("v.status = 'approved'");
 
-    if (search) {
-      const s = `%${search}%`;
-      countQb.andWhere('(o.title LIKE :s1 OR v.business_name LIKE :s2 OR o.category LIKE :s3 OR o.description LIKE :s4)',
-        { s1: s, s2: s, s3: s, s4: s });
-    }
+    if (distExpr !== 'NULL') countQb.setParameters({ ulat: lat, ulng: lng });
+    if (searchClause) countQb.andWhere(searchClause.clause, searchClause.params);
+    this.applyFeedFilters(countQb, { category, distanceKm, filter, distExpr });
 
     const { total } = await countQb.getRawOne();
 
+    // Nearest offers first when we know where the user is; vendors without
+    // coordinates go last. Score/recency break ties at the same distance.
+    if (lat && lng) {
+      qb.orderBy(distExpr, 'ASC', 'NULLS LAST')
+        .addOrderBy('score', 'DESC')
+        .addOrderBy('o.created_at', 'DESC');
+    } else {
+      qb.orderBy('score', 'DESC')
+        .addOrderBy('o.is_featured', 'DESC')
+        .addOrderBy('o.created_at', 'DESC');
+    }
+
     const offers = await qb
-      .orderBy('score', 'DESC')
-      .addOrderBy('o.is_featured', 'DESC')
-      .addOrderBy('o.created_at', 'DESC')
       .limit(limit)
       .offset(offset)
       .getRawMany();
@@ -138,15 +205,19 @@ export class FeedService {
     return { offers, total: +total };
   }
 
-  async trending(city: string, lat: number, lng: number, page: number, perPage = 20, search = '') {
-    const limit = perPage;
-    const offset = (page - 1) * limit;
+  async trending(
+    city: string, lat: number, lng: number, page: number, perPage = 20, search = '',
+    category = '', distanceKm = 0, filter = '',
+  ) {
+    const limit = clampLimit(perPage, 20, 500);
+    const offset = (Math.max(page, 1) - 1) * limit;
 
+    // Bound as :ulat/:ulng (not interpolated) — see personalized() note.
     const distExpr = lat && lng
       ? `ROUND((6371 * ACOS(GREATEST(-1, LEAST(1,
-           COS(RADIANS(${lat})) * COS(RADIANS(v.lat)) *
-           COS(RADIANS(v.lng) - RADIANS(${lng})) +
-           SIN(RADIANS(${lat})) * SIN(RADIANS(v.lat))
+           COS(RADIANS(:ulat)) * COS(RADIANS(v.lat)) *
+           COS(RADIANS(v.lng) - RADIANS(:ulng)) +
+           SIN(RADIANS(:ulat)) * SIN(RADIANS(v.lat))
          ))))::numeric, 1)`
       : 'NULL';
 
@@ -169,13 +240,13 @@ export class FeedService {
       .andWhere('(o.valid_until IS NULL OR o.valid_until >= NOW())')
       .andWhere("v.status = 'approved'");
 
+    if (distExpr !== 'NULL') qb.setParameters({ ulat: lat, ulng: lng });
     if (city) {
       qb.andWhere('(v.city ILIKE :city OR o.category IS NOT NULL)', { city });
     }
-    if (search) {
-      const s = `%${search}%`;
-      qb.andWhere('(o.title ILIKE :s1 OR v.business_name ILIKE :s2 OR o.category ILIKE :s3)', { s1: s, s2: s, s3: s });
-    }
+    const searchClause = this.buildSearchClause(search);
+    if (searchClause) qb.andWhere(searchClause.clause, searchClause.params);
+    this.applyFeedFilters(qb, { category, distanceKm, filter, distExpr });
 
     const countQb = this.dataSource
       .createQueryBuilder()
@@ -186,13 +257,12 @@ export class FeedService {
       .andWhere('(o.valid_until IS NULL OR o.valid_until >= NOW())')
       .andWhere("v.status = 'approved'");
 
+    if (distExpr !== 'NULL') countQb.setParameters({ ulat: lat, ulng: lng });
     if (city) {
       countQb.andWhere('(v.city ILIKE :city OR o.category IS NOT NULL)', { city });
     }
-    if (search) {
-      const s = `%${search}%`;
-      countQb.andWhere('(o.title ILIKE :s1 OR v.business_name ILIKE :s2 OR o.category ILIKE :s3)', { s1: s, s2: s, s3: s });
-    }
+    if (searchClause) countQb.andWhere(searchClause.clause, searchClause.params);
+    this.applyFeedFilters(countQb, { category, distanceKm, filter, distExpr });
 
     const countRow = await countQb.getRawOne();
     const total = countRow?.total ?? 0;
@@ -287,19 +357,20 @@ export class FeedService {
   }
 
   async logInteraction(userId: number, offerId: number, action: string) {
-    const validActions = ['view', 'click', 'save', 'redeem', 'share', 'skip'];
+    const validActions = ['view', 'click', 'save', 'redeem', 'share', 'skip', 'direction'];
     if (!validActions.includes(action)) throw new Error('Invalid action');
 
     const offer = await this.offerRepo.findOne({
       where: { id: offerId },
-      select: ['id', 'category', 'vendor_id', 'max_redemptions', 'current_redemptions'],
+      select: ['id', 'category', 'vendor_id', 'max_redemptions', 'current_redemptions', 'coins_required'],
     });
     if (!offer) throw new Error('Offer not found');
 
-    const colMap: Record<string, string> = { view: 'views', click: 'clicks', save: 'saves' };
+    // NOTE: `click` no longer feeds offers.clicks — the clicks counter now
+    // means "unique users who redeemed or asked for directions".
+    const colMap: Record<string, string> = { view: 'views', save: 'saves' };
 
     // For view/click: skip both the row insert AND the counter increment if already logged within 1 hour.
-    // This keeps user_interactions consistent with the deduplicated offers.clicks/views columns.
     if (action === 'view' || action === 'click') {
       const since = new Date(Date.now() - 60 * 60 * 1000);
       const recent = await this.userInteractionRepo
@@ -315,6 +386,65 @@ export class FeedService {
       }
     }
 
+    // Coin-exclusive deals: first redeem charges the user's coin wallet.
+    // Charge and the redeem row commit together — a crash can't take coins
+    // without recording the redemption (or vice versa).
+    if (action === 'redeem' && (offer as any).coins_required > 0) {
+      await this.dataSource.transaction(async (em) => {
+        const paid = await em.query(
+          `SELECT 1 FROM user_interactions
+            WHERE user_id = $1 AND offer_id = $2 AND action = 'redeem'
+           UNION
+           SELECT 1 FROM redemption_codes WHERE user_id = $1 AND offer_id = $2
+           LIMIT 1`, [userId, offerId]);
+        if (!paid.length) {
+          const res = await em.query(
+            `UPDATE users SET coins = coins - $1
+              WHERE id = $2 AND coins >= $1 RETURNING coins`,
+            [(offer as any).coins_required, userId]);
+          if (!res.length) {
+            throw new Error(`This deal needs ${(offer as any).coins_required} coins — earn more by daily check-ins and referrals`);
+          }
+        }
+        await em.query(
+          `INSERT INTO user_interactions (user_id, offer_id, action, category)
+           VALUES ($1, $2, 'redeem', $3)`,
+          [userId, offerId, offer.category]);
+      });
+
+      // Row already written inside the transaction — finish the counters and exit
+      const prior = await this.userInteractionRepo
+        .createQueryBuilder('ui')
+        .where("ui.user_id = :userId AND ui.offer_id = :offerId AND ui.action = 'redeem'", { userId, offerId })
+        .getCount();
+      if (prior === 1) {
+        await this.offerRepo.increment({ id: offerId }, 'clicks', 1);
+      }
+      const fresh = await this.offerRepo.findOne({
+        where: { id: offerId },
+        select: ['id', 'max_redemptions', 'current_redemptions'],
+      });
+      if (fresh && (fresh.max_redemptions ?? 0) > 0 && (fresh.current_redemptions ?? 0) >= (fresh.max_redemptions ?? 0)) {
+        throw new Error('Redemption limit reached');
+      }
+      await this.offerRepo.increment({ id: offerId }, 'current_redemptions', 1);
+      if (offer.category) await this.updatePreferences(userId, offer.category, offerId, action);
+      return { recorded: true, vendor_id: offer.vendor_id };
+    }
+
+    // Clicks are unique per user PER ACTION: the first redeem and the first
+    // direction each bump offers.clicks once, repeats never do.
+    let firstEngagement = false;
+    if (action === 'redeem' || action === 'direction') {
+      const prior = await this.userInteractionRepo
+        .createQueryBuilder('ui')
+        .where('ui.user_id = :userId AND ui.offer_id = :offerId AND ui.action = :action', {
+          userId, offerId, action,
+        })
+        .getCount();
+      firstEngagement = prior === 0;
+    }
+
     await this.userInteractionRepo.save({
       user_id: userId,
       offer_id: offerId,
@@ -324,6 +454,9 @@ export class FeedService {
 
     if (colMap[action]) {
       await this.offerRepo.increment({ id: offerId }, colMap[action], 1);
+    }
+    if (firstEngagement) {
+      await this.offerRepo.increment({ id: offerId }, 'clicks', 1);
     }
 
     if (action === 'save') {

@@ -8,6 +8,7 @@ import { PushService } from '../services/push.service';
 import { NotificationTemplateService } from './notification-template.service';
 import { NotificationCapService } from './notification-cap.service';
 import { UserFcmToken } from '../entities/user-fcm-token.entity';
+import { isPrimaryInstance } from '../common/utils/cron-guard';
 
 // Weights reflect intent strength: saving/redeeming signals much stronger interest than just viewing
 const ACTION_WEIGHT: Record<string, number> = {
@@ -38,6 +39,7 @@ export class InterestNotificationService {
   // 2:00 PM IST daily
   @Cron('0 14 * * *', { name: 'interest_notif', timeZone: 'Asia/Kolkata' })
   async run() {
+    if (!isPrimaryInstance()) return;
     const candidates = await this.buildCandidates();
     if (!candidates.length) {
       this.logger.log('Interest notify: no candidates');

@@ -20,6 +20,8 @@ export class OfferReviewsService {
         'r.created_at AS "createdAt"',
         'u.name AS "userName"',
         'u.avatar_url AS "userAvatar"',
+        'r.vendor_reply AS "vendorReply"',
+        'r.replied_at AS "repliedAt"',
       ])
       .where('r.offer_id = :offerId', { offerId })
       .orderBy('r.created_at', 'DESC')

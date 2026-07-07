@@ -300,6 +300,43 @@ export class AuthService {
     return user;
   }
 
+  async dailyCheckin(userId: number) {
+    // Dates in IST — the audience's local day
+    const now = new Date(Date.now() + 5.5 * 3600 * 1000);
+    const today = now.toISOString().slice(0, 10);
+    const yesterday = new Date(now.getTime() - 86400000).toISOString().slice(0, 10);
+
+    // Single atomic statement — the WHERE clause makes concurrent duplicate
+    // check-ins a no-op instead of a double award.
+    const rows = await this.userRepo.manager.query(
+      `UPDATE users
+          SET streak_count = CASE WHEN last_checkin = $2::date THEN streak_count + 1 ELSE 1 END,
+              coins = coins + LEAST(CASE WHEN last_checkin = $2::date THEN streak_count + 1 ELSE 1 END, 7) * 5,
+              last_checkin = $1::date
+        WHERE id = $3
+          AND (last_checkin IS NULL OR last_checkin < $1::date)
+        RETURNING streak_count, coins`,
+      [today, yesterday, userId],
+    );
+    const updated = rows?.[0]?.[0] ?? rows?.[0]; // driver returns [rows, count]
+    if (updated?.streak_count !== undefined) {
+      const streak = Number(updated.streak_count);
+      return {
+        streak,
+        coins_awarded: Math.min(streak, 7) * 5,
+        total_coins: Number(updated.coins),
+      };
+    }
+
+    // Already checked in today (or user missing) — report current state
+    const user = await this.userRepo.findOne({
+      where: { id: userId },
+      select: ['id', 'coins', 'streak_count'],
+    });
+    if (!user) throw new NotFoundException('User not found');
+    return { streak: user.streak_count, coins_awarded: 0, total_coins: user.coins };
+  }
+
   async updateLocation(userId: number, lat: number, lng: number, city?: string, accuracy?: number, source = 'gps') {
     await Promise.all([
       this.userLocationRepo.save({ user_id: userId, lat, lng, city: city ?? null, accuracy: accuracy ?? null, source }),

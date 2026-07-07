@@ -43,6 +43,11 @@ export class NotificationsService {
     return { updated: true };
   }
 
+  async clearAll(userId: number) {
+    await this.notifRepo.delete({ user_id: userId });
+    return { cleared: true };
+  }
+
   async saveToken(userId: number, token: string, platform = 'web') {
     const existing = await this.userFcmTokenRepo.findOne({ where: { token } });
     if (existing) {

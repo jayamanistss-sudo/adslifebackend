@@ -65,6 +65,12 @@ export class User {
   @Column({ type: 'int', default: 0 })
   coins: number;
 
+  @Column({ type: 'int', default: 0 })
+  streak_count: number;
+
+  @Column({ type: 'date', nullable: true })
+  last_checkin: string | null;
+
   @Column({ type: 'varchar', length: 20, unique: true, nullable: true })
   referral_code: string | null;
 

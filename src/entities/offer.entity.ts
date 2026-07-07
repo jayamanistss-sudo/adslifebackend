@@ -32,6 +32,9 @@ export class Offer {
   @Column({ type: 'varchar', length: 100, nullable: true })
   coupon_code: string | null;
 
+  @Column({ type: 'int', default: 0 })
+  coins_required: number;
+
   @Column({ type: 'text', nullable: true })
   redeem_url: string | null;
 

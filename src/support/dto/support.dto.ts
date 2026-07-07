@@ -1,4 +1,5 @@
 import { IsString, IsNotEmpty, IsOptional, IsIn, MaxLength } from 'class-validator';
+import { Transform } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CreateTicketDto {
@@ -9,15 +10,18 @@ export class CreateTicketDto {
   subject: string;
 
   @ApiProperty({ example: 'When I try to upload an image, I get a 500 error.' })
+  // Clients send the body as "message" or (legacy) "description" — accept both.
+  @Transform(({ value, obj }) => value ?? obj.description)
   @IsString()
   @IsNotEmpty()
   @MaxLength(2000)
   message: string;
 
-  @ApiPropertyOptional({ enum: ['general', 'billing', 'technical', 'account'], default: 'general' })
+  @ApiPropertyOptional({ enum: ['general', 'billing', 'technical', 'account', 'offer', 'other'], default: 'general' })
+  @Transform(({ value }) => value ?? 'general')
   @IsOptional()
   @IsString()
-  @IsIn(['general', 'billing', 'technical', 'account'])
+  @IsIn(['general', 'billing', 'technical', 'account', 'offer', 'other'])
   category?: string = 'general';
 }
 

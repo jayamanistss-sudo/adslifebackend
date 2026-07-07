@@ -32,9 +32,13 @@ export class FeedController {
     @Query('page',     new DefaultValuePipe(1),        ParseIntPipe)   page: number,
     @Query('per_page', new DefaultValuePipe(20),       ParseIntPipe)   perPage: number,
     @Query('q') q = '',
+    @Query('category') category = '',
+    @Query('distance', new DefaultValuePipe(0), ParseFloatPipe) distance: number,
+    @Query('filter') filter = '',
   ) {
     const userId = user?.user_id ?? 0;
-    const { offers, total } = await this.feedService.personalized(userId, lat, lng, page, perPage, q);
+    const { offers, total } = await this.feedService.personalized(
+      userId, lat, lng, page, perPage, q, category, distance, filter);
     return { success: true, data: offers, total };
   }
 
@@ -47,8 +51,12 @@ export class FeedController {
     @Query('per_page', new DefaultValuePipe(20),       ParseIntPipe)   perPage: number,
     @Query('city') city: string = '',
     @Query('q') q = '',
+    @Query('category') category = '',
+    @Query('distance', new DefaultValuePipe(0), ParseFloatPipe) distance: number,
+    @Query('filter') filter = '',
   ) {
-    const { offers, total } = await this.feedService.trending(city, lat, lng, page, perPage, q);
+    const { offers, total } = await this.feedService.trending(
+      city, lat, lng, page, perPage, q, category, distance, filter);
     return { success: true, data: offers, total };
   }
 

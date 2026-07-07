@@ -3,6 +3,7 @@ import { Cron } from '@nestjs/schedule';
 import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
 import { NotificationTemplateService } from './notification-template.service';
+import { isPrimaryInstance } from '../common/utils/cron-guard';
 
 const TYPES = ['morning', 'lunch', 'evening', 'dinner', 'goodnight', 'weekend', 'reengage', 'personalized_search', 'interest_alert'];
 
@@ -25,6 +26,7 @@ export class GeminiTemplateService {
   // 3:00 AM IST
   @Cron('0 3 * * *', { name: 'gemini_template_gen', timeZone: 'Asia/Kolkata' })
   async generateDailyBatch() {
+    if (!isPrimaryInstance()) return;
     const apiKey = this.config.get<string>('gemini.apiKey');
     if (!apiKey) {
       this.logger.log('generateDailyBatch: GEMINI_API_KEY not set, skipping');

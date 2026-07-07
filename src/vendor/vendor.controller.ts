@@ -14,6 +14,7 @@ import { Public } from '../common/decorators/public.decorator';
 import { UpdateVendorProfileDto } from './dto/vendor.dto';
 import { Offer } from '../entities/offer.entity';
 import { OfferReview } from '../entities/offer-review.entity';
+import { RedemptionCode } from '../entities/redemption-code.entity';
 
 @ApiTags('vendor')
 @ApiBearerAuth()
@@ -24,6 +25,7 @@ export class VendorController {
     private readonly vendorService: VendorService,
     @InjectRepository(Offer) private readonly offerRepo: Repository<Offer>,
     @InjectRepository(OfferReview) private readonly reviewRepo: Repository<OfferReview>,
+    @InjectRepository(RedemptionCode) private readonly redemptionRepo: Repository<RedemptionCode>,
   ) {}
 
   @Roles('vendor', 'admin')
@@ -126,6 +128,7 @@ export class VendorController {
       .select([
         'r.id AS id', 'r.offer_id AS "offerId"', 'r.rating AS rating',
         'r.comment AS comment', 'r.created_at AS "createdAt"',
+        'r.vendor_reply AS "vendorReply"', 'r.replied_at AS "repliedAt"',
         'u.name AS "userName"', 'u.avatar_url AS "userAvatar"',
       ])
       .where('r.offer_id IN (:...ids)', { ids: idList })
@@ -138,6 +141,74 @@ export class VendorController {
       .getCount();
     const data = reviews.map((r) => ({ ...r, offerTitle: titleMap.get(Number(r.offerId)) ?? '' }));
     return { success: true, data, total };
+  }
+
+  @Roles('vendor', 'admin')
+  @Put('reviews/:id/reply')
+  @ApiBody({ schema: { required: ['reply'], properties: { reply: { type: 'string', example: 'Thank you for the feedback!' } } } })
+  async replyToReview(
+    @CurrentUser() user: any,
+    @Param('id', ParseIntPipe) reviewId: number,
+    @Body('reply') reply: string,
+  ) {
+    const vendorId = await this.vendorService.getMyVendorId(user.user_id);
+    if (!vendorId) return { success: false, error: 'Vendor not found' };
+    const review = await this.reviewRepo
+      .createQueryBuilder('r')
+      .innerJoin('offers', 'o', 'o.id = r.offer_id')
+      .select(['r.id AS id'])
+      .where('r.id = :reviewId AND o.vendor_id = :vendorId', { reviewId, vendorId })
+      .getRawOne();
+    if (!review) return { success: false, error: 'Review not found' };
+    const text = (reply ?? '').trim();
+    await this.reviewRepo.update(reviewId, {
+      vendor_reply: text.length ? text.slice(0, 1000) : null,
+      replied_at: text.length ? new Date() : null,
+    });
+    return { success: true, data: { replied: true } };
+  }
+
+  @Roles('vendor', 'admin')
+  @Post('redemptions/verify')
+  @ApiBody({ schema: { required: ['code'], properties: { code: { type: 'string', example: 'AB12CD' } } } })
+  async verifyRedemption(@CurrentUser() user: any, @Body('code') code: string) {
+    const vendorId = await this.vendorService.getMyVendorId(user.user_id);
+    if (!vendorId) return { success: false, error: 'Vendor not found' };
+    const clean = (code ?? '').trim().toUpperCase();
+    if (!clean) return { success: false, error: 'Enter a code' };
+
+    const row = await this.redemptionRepo
+      .createQueryBuilder('rc')
+      .innerJoin('offers', 'o', 'o.id = rc.offer_id')
+      .innerJoin('users', 'u', 'u.id = rc.user_id')
+      .select(['rc.id AS id', 'rc.status AS status', 'rc.user_id AS user_id',
+               'rc.offer_id AS offer_id', 'o.vendor_id AS owner_vendor_id',
+               'o.title AS offer_title', 'u.name AS user_name'])
+      .where('rc.code = :clean', { clean })
+      .getRawOne();
+    if (!row) return { success: false, error: 'Invalid code — no such code exists' };
+    if (Number(row.owner_vendor_id) !== Number(vendorId)) {
+      return { success: false, error: "This code belongs to another shop's offer — it can only be verified by that shop" };
+    }
+    if (row.status === 'verified') {
+      return { success: false, error: 'Code already used' };
+    }
+
+    await this.redemptionRepo.update(row.id, {
+      status: 'verified', verified_at: new Date(), verified_by: user.user_id,
+    });
+    // Count as a verified redemption for analytics (unique per user handled
+    // by the interaction pipeline semantics; verified codes are one-shot).
+    await this.redemptionRepo.manager.query(
+      `INSERT INTO user_interactions (user_id, offer_id, action, category)
+       SELECT $1, $2, 'redeem', o.category FROM offers o WHERE o.id = $2`,
+      [row.user_id, row.offer_id],
+    );
+    await this.offerRepo.increment({ id: row.offer_id }, 'current_redemptions', 1);
+    return {
+      success: true,
+      data: { offer_title: row.offer_title, customer: row.user_name, verified: true },
+    };
   }
 
   @Roles('vendor', 'admin')

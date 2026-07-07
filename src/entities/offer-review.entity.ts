@@ -25,6 +25,12 @@ export class OfferReview {
   @Column({ type: 'text', nullable: true })
   comment: string | null;
 
+  @Column({ type: 'text', nullable: true })
+  vendor_reply: string | null;
+
+  @Column({ type: 'timestamp', nullable: true })
+  replied_at: Date | null;
+
   @CreateDateColumn()
   created_at: Date;
 

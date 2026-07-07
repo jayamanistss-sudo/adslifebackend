@@ -42,12 +42,24 @@ export class SpotlightController {
     const isAdmin = user.role === 'admin';
     let rows: any[];
 
+    // getRawMany() prefixes bare-entity selections (sr_id, sr_created_at…) —
+    // alias every column explicitly so clients get stable names.
+    const srCols = [
+      'sr.id AS id', 'sr.vendor_id AS vendor_id', 'sr.offer_id AS offer_id',
+      'sr.message AS message', 'sr.duration_days AS duration_days',
+      'sr.status AS status', 'sr.starts_at AS starts_at',
+      'sr.ends_at AS ends_at', 'sr.created_at AS created_at',
+    ];
     if (isAdmin) {
       const qb = this.spotlightRepo
         .createQueryBuilder('sr')
         .innerJoin(Vendor, 'v', 'sr.vendor_id = v.id')
         .innerJoin(User, 'u', 'v.user_id = u.id')
-        .select(['sr', 'v.business_name', 'v.city', 'u.email as vendor_email', 'v.subscription_plan'])
+        .select([
+          ...srCols,
+          'v.business_name AS business_name', 'v.city AS city',
+          'u.email AS vendor_email', 'v.subscription_plan AS subscription_plan',
+        ])
         .orderBy('sr.created_at', 'DESC');
       if (status) qb.where('sr.status = :status', { status });
       rows = await qb.getRawMany();
@@ -55,7 +67,7 @@ export class SpotlightController {
       rows = await this.spotlightRepo
         .createQueryBuilder('sr')
         .innerJoin(Vendor, 'v', 'sr.vendor_id = v.id')
-        .select('sr')
+        .select(srCols)
         .where('v.user_id = :userId', { userId: user.user_id })
         .orderBy('sr.created_at', 'DESC')
         .getRawMany();

@@ -3,6 +3,7 @@ import {
   ParseIntPipe, UseGuards,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiBody } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { AdminService } from './admin.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -75,15 +76,30 @@ export class AdminController {
     return { success: true, data };
   }
 
+  @Throttle({ default: { limit: 3, ttl: 60000 } }) // max 3 broadcasts/min
   @Post('broadcast')
-  async broadcast(@Body() dto: BroadcastDto) {
-    const result = await this.adminService.broadcast(dto.title, dto.body, dto.data ?? {});
+  async broadcast(@CurrentUser() user: any, @Body() dto: BroadcastDto) {
+    const result = await this.adminService.broadcast(dto.title, dto.body, dto.data ?? {}, user.user_id);
     return { success: true, data: result };
   }
 
   @Public()
   @Get('site-settings')
   async getSiteSettings() {
+    const data = await this.adminService.getSiteSettings();
+    // Public route — strip anything secret-ish (payment keys etc.)
+    const safe: Record<string, any> = {};
+    for (const [k, v] of Object.entries(data)) {
+      if (/secret|api_key|password|webhook/i.test(k)) continue;
+      if (k.startsWith('cashfree_') && k !== 'cashfree_env') continue;
+      safe[k] = v;
+    }
+    return { success: true, data: safe };
+  }
+
+  @Get('site-settings/all')
+  async getSiteSettingsAll() {
+    // Admin-only (class-level guards apply): full list incl. payment config
     const data = await this.adminService.getSiteSettings();
     return { success: true, data };
   }

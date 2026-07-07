@@ -9,6 +9,8 @@ import { NotificationCapService } from './notification-cap.service';
 import { GeminiTemplateService } from './gemini-template.service';
 import { PushOutboxService } from './push-outbox.service';
 import { InterestNotificationService } from './interest-notification.service';
+import { ExpiryReminderService } from './expiry-reminder.service';
+import { VendorDigestService } from './vendor-digest.service';
 import { PushService } from '../services/push.service';
 import { Notification } from '../entities/notification.entity';
 import { UserFcmToken } from '../entities/user-fcm-token.entity';
@@ -32,6 +34,8 @@ import { NotificationOutbox } from '../entities/notification-outbox.entity';
     NotificationCapService,
     GeminiTemplateService,
     InterestNotificationService,
+    ExpiryReminderService,
+    VendorDigestService,
   ],
   exports: [PushService, NotificationTemplateService],
 })

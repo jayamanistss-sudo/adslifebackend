@@ -14,11 +14,24 @@ async function bootstrap() {
   // Parse cookies — required for httpOnly JWT cookie auth on web clients
   app.use(cookieParser());
 
-  // Capture raw body for Cashfree webhook HMAC verification BEFORE json parsing
+  // Capture raw body for Razorpay webhook HMAC verification BEFORE json parsing
   app.use('/api/payment/webhook', express.raw({ type: 'application/json' }));
 
-  // Security headers (CSP relaxed for monitor dashboard CDN assets)
-  app.use(helmet({
+  // Security headers. Strict CSP everywhere by default; the relaxed policy
+  // (inline scripts + jsdelivr CDN) applies only to the HTML pages that need
+  // it: the landing page, the monitor dashboard, and Swagger UI.
+  const strictHelmet = helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: ["'self'", 'data:', 'https:'],
+        connectSrc: ["'self'"],
+      },
+    },
+  });
+  const relaxedHelmet = helmet({
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
@@ -30,7 +43,12 @@ async function bootstrap() {
         fontSrc: ["'self'", 'cdn.jsdelivr.net'],
       },
     },
-  }));
+  });
+  app.use((req: any, res: any, next: any) => {
+    const p = req.path;
+    const needsRelaxed = p === '/' || p === '/index.html' || p === '/monitor' || p.startsWith('/docs');
+    return (needsRelaxed ? relaxedHelmet : strictHelmet)(req, res, next);
+  });
 
   // Request size limit (raised for base64-encoded image payloads, ~33% larger than the 5MB raw image)
   app.use(express.json({ limit: '15mb' }));

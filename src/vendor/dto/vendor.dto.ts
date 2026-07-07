@@ -2,7 +2,7 @@ import {
   IsString, IsOptional, IsNumber, IsUrl, IsLatitude, IsLongitude,
   MaxLength, MinLength, Matches,
 } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Type, Transform } from 'class-transformer';
 import { ApiPropertyOptional, ApiProperty } from '@nestjs/swagger';
 
 export class UpdateVendorProfileDto {
@@ -30,12 +30,16 @@ export class UpdateVendorProfileDto {
   address?: string;
 
   @ApiPropertyOptional({ example: '9876543210' })
+  @Transform(({ value }) => (value === '' ? null : value))
   @IsOptional()
   @IsString()
-  @Matches(/^[0-9+\-\s()]{7,15}$/, { message: 'Invalid phone number' })
+  @Matches(/^(\+91[\s-]?)?[6-9]\d{9}$/, { message: 'phone must be a valid 10-digit mobile number' })
   phone?: string;
 
   @ApiPropertyOptional({ example: 'https://saibakery.in' })
+  // Clients send '' when the field is cleared — map to null so @IsUrl()
+  // doesn't reject it and the service clears the stored value.
+  @Transform(({ value }) => (value === '' ? null : value))
   @IsOptional()
   @IsUrl()
   website?: string;
@@ -46,6 +50,7 @@ export class UpdateVendorProfileDto {
   description?: string;
 
   @ApiPropertyOptional({ example: 'https://cdn.adslife.in/logos/sai-bakery.png' })
+  @Transform(({ value }) => (value === '' ? null : value))
   @IsOptional()
   @IsUrl()
   logo_url?: string;

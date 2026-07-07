@@ -19,6 +19,7 @@ import { FeedModule } from './feed/feed.module';
 import { VendorModule } from './vendor/vendor.module';
 import { AdminModule } from './admin/admin.module';
 import { PaymentModule } from './payment/payment.module';
+import { RazorpayModule } from './razorpay/razorpay.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { FraudModule } from './fraud/fraud.module';
@@ -56,6 +57,7 @@ import { GatewayModule } from './gateway/gateway.module';
     VendorModule,
     AdminModule,
     PaymentModule,
+    RazorpayModule,
     NotificationsModule,
     AnalyticsModule,
     FraudModule,

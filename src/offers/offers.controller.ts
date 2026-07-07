@@ -14,6 +14,10 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Public } from '../common/decorators/public.decorator';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { RedemptionCode } from '../entities/redemption-code.entity';
+import { Offer } from '../entities/offer.entity';
 
 @ApiTags('offers')
 @ApiBearerAuth()
@@ -24,7 +28,37 @@ export class OffersController {
     private readonly offersService: OffersService,
     private readonly offerReviewsService: OfferReviewsService,
     private readonly offerReportsService: OfferReportsService,
+    @InjectRepository(RedemptionCode) private readonly redemptionRepo: Repository<RedemptionCode>,
+    @InjectRepository(Offer) private readonly offerRepoDirect: Repository<Offer>,
   ) {}
+
+  /** In-store verification code: user shows this (or its QR) at the shop. */
+  @Post(':id/redemption-code')
+  async redemptionCode(@CurrentUser() user: any, @Param('id', ParseIntPipe) offerId: number) {
+    const offer = await this.offerRepoDirect.findOne({
+      where: { id: offerId, is_active: true }, select: ['id', 'title'],
+    });
+    if (!offer) return { success: false, error: 'Offer not found' };
+
+    // Reuse an unexpired pending code so repeated opens show the same one
+    let rc = await this.redemptionRepo.findOne({
+      where: { offer_id: offerId, user_id: user.user_id, status: 'pending' },
+    });
+    if (!rc) {
+      // 6 chars, no confusables (0/O, 1/I)
+      const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+      for (let attempt = 0; attempt < 5 && !rc; attempt++) {
+        const code = Array.from({ length: 6 },
+          () => alphabet[Math.floor(Math.random() * alphabet.length)]).join('');
+        try {
+          rc = await this.redemptionRepo.save(
+            this.redemptionRepo.create({ offer_id: offerId, user_id: user.user_id, code }));
+        } catch { /* code collision — retry */ }
+      }
+      if (!rc) return { success: false, error: 'Could not generate code, try again' };
+    }
+    return { success: true, data: { code: rc.code, offer_title: offer.title } };
+  }
 
   @Public()
   @UseGuards(OptionalJwtAuthGuard)

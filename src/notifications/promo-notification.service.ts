@@ -7,6 +7,7 @@ import { User } from '../entities/user.entity';
 import { UserFcmToken } from '../entities/user-fcm-token.entity';
 import { NotificationTemplateService } from './notification-template.service';
 import { NotificationCapService } from './notification-cap.service';
+import { isPrimaryInstance } from '../common/utils/cron-guard';
 
 @Injectable()
 export class PromoNotificationService {
@@ -60,42 +61,49 @@ export class PromoNotificationService {
   // 7:00 AM IST
   @Cron('0 7 * * *', { name: 'morning_notif', timeZone: 'Asia/Kolkata' })
   async sendMorningNotification() {
+    if (!isPrimaryInstance()) return;
     await this.broadcast('morning', 'Morning');
   }
 
   // 12:30 PM IST
   @Cron('30 12 * * *', { name: 'lunch_notif', timeZone: 'Asia/Kolkata' })
   async sendLunchNotification() {
+    if (!isPrimaryInstance()) return;
     await this.broadcast('lunch', 'Lunch');
   }
 
   // 6:00 PM IST
   @Cron('0 18 * * *', { name: 'evening_notif', timeZone: 'Asia/Kolkata' })
   async sendEveningNotification() {
+    if (!isPrimaryInstance()) return;
     await this.broadcast('evening', 'Evening');
   }
 
   // 9:00 PM IST
   @Cron('0 21 * * *', { name: 'dinner_notif', timeZone: 'Asia/Kolkata' })
   async sendDinnerNotification() {
+    if (!isPrimaryInstance()) return;
     await this.broadcast('dinner', 'Dinner');
   }
 
   // 11:00 PM IST, every day
   @Cron('0 23 * * *', { name: 'goodnight_notif', timeZone: 'Asia/Kolkata' })
   async sendGoodNightNotification() {
+    if (!isPrimaryInstance()) return;
     await this.broadcast('goodnight', 'Good Night');
   }
 
   // Saturday & Sunday 10:00 AM IST
   @Cron('0 10 * * 6,0', { name: 'weekend_notif', timeZone: 'Asia/Kolkata' })
   async sendWeekendNotification() {
+    if (!isPrimaryInstance()) return;
     await this.broadcast('weekend', 'Weekend');
   }
 
   // Re-engagement: every Tuesday 11:00 AM IST — target users not seen in 3+ days
   @Cron('0 11 * * 2', { name: 'reengage_notif', timeZone: 'Asia/Kolkata' })
   async sendReengagementNotification() {
+    if (!isPrimaryInstance()) return;
     const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
     const allIds = await this.getActiveUserIds();
 

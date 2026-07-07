@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Logger, Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
@@ -15,9 +15,11 @@ import { VendorApplication } from '../entities/vendor-application.entity';
 import { SubscriptionPlan } from '../entities/subscription-plan.entity';
 import { FraudFlag, FraudFlagStatus } from '../entities/fraud-flag.entity';
 import { Payment } from '../entities/payment.entity';
+import { clampLimit } from '../common/utils/pagination';
 
 @Injectable()
 export class AdminService {
+  private readonly logger = new Logger(AdminService.name);
   constructor(
     @InjectRepository(User) private readonly userRepo: Repository<User>,
     @InjectRepository(Vendor) private readonly vendorRepo: Repository<Vendor>,
@@ -99,7 +101,8 @@ export class AdminService {
   }
 
   async getUsers(page = 1, search = '', role = '', status = '', limit = 30) {
-    const offset = (page - 1) * limit;
+    limit = clampLimit(limit, 30);
+    const offset = (Math.max(page, 1) - 1) * limit;
     const qb = this.userRepo.createQueryBuilder('u');
     if (search) qb.andWhere('(u.name LIKE :s OR u.email LIKE :s OR u.city LIKE :s)', { s: `%${search}%` });
     if (role) qb.andWhere('u.role = :role', { role });
@@ -122,6 +125,8 @@ export class AdminService {
   }
 
   async getVendors(search = '', status = '', plan = '', limit = 30, offset = 0) {
+    limit = clampLimit(limit, 30);
+    offset = Math.max(Number(offset) || 0, 0);
     const qb = this.vendorRepo
       .createQueryBuilder('v')
       .innerJoin(User, 'u', 'u.id = v.user_id');
@@ -239,6 +244,8 @@ export class AdminService {
   }
 
   async getAdminOffers(search = '', category = '', status = '', limit = 30, offset = 0) {
+    limit = clampLimit(limit, 30);
+    offset = Math.max(Number(offset) || 0, 0);
     const qb = this.offerRepo
       .createQueryBuilder('o')
       .innerJoin(Vendor, 'v', 'v.id = o.vendor_id')
@@ -259,10 +266,12 @@ export class AdminService {
     return { offers, total };
   }
 
-  async broadcast(title: string, body: string, data: Record<string, string> = {}) {
+  async broadcast(title: string, body: string, data: Record<string, string> = {}, adminId?: number) {
     const users = await this.userRepo.find({ where: { is_active: true }, select: ['id'] });
     const ids = users.map(u => u.id);
     const sent = await this.push.send(ids, title, body, data);
+    // Audit trail: who sent what to how many
+    this.logger.log(`BROADCAST by admin ${adminId ?? '?'}: "${title}" -> ${sent}/${ids.length} users`);
     return { sent, total: ids.length };
   }
 

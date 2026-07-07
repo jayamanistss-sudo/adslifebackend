@@ -1,5 +1,5 @@
-import { IsString, IsOptional, IsNotEmpty, IsNumber, IsUrl } from 'class-validator';
-import { Type } from 'class-transformer';
+import { IsString, IsOptional, IsNotEmpty, IsNumber, IsUrl, Matches } from 'class-validator';
+import { Type, Transform } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class GoogleAuthDto {
@@ -38,9 +38,11 @@ export class BecomeVendorDto {
   @IsString()
   city?: string;
 
-  @ApiPropertyOptional({ example: '+91 9876543210' })
+  @ApiPropertyOptional({ example: '9876543210' })
+  @Transform(({ value }) => (value === '' ? null : value))
   @IsOptional()
   @IsString()
+  @Matches(/^(\+91[\s-]?)?[6-9]\d{9}$/, { message: 'phone must be a valid 10-digit mobile number' })
   phone?: string;
 
   @ApiPropertyOptional({ example: '12, Anna Nagar, Chennai - 600040' })
@@ -61,6 +63,9 @@ export class BecomeVendorDto {
   lng?: number;
 
   @ApiPropertyOptional({ example: 'https://saibakery.in' })
+  // Clients send '' when the field is left blank — map to null so
+  // @IsUrl() doesn't reject a blank optional field.
+  @Transform(({ value }) => (value === '' ? null : value))
   @IsOptional()
   @IsUrl({}, { message: 'website must be a valid URL' })
   website?: string;

@@ -52,6 +52,12 @@ export class CreateOfferDto {
   max_redemptions?: number;
 
   @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  coins_required?: number;
+
+  @IsOptional()
   @IsString()
   valid_from?: string;
 

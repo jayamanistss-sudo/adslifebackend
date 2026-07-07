@@ -71,6 +71,7 @@ export class OffersService {
       coupon_code: dto.coupon_code?.trim() || null,
       redeem_url: dto.redeem_url?.trim() || null,
       max_redemptions: dto.max_redemptions ?? 0,
+      coins_required: dto.coins_required ?? 0,
       valid_from: validFrom,
       valid_until: validUntil,
       is_active: true,
@@ -152,6 +153,7 @@ export class OffersService {
     if (dto.original_price !== undefined)            updateData.original_price = dto.original_price;
     if (dto.offer_price !== undefined)               updateData.offer_price = dto.offer_price;
     if (dto.max_redemptions !== undefined)           updateData.max_redemptions = dto.max_redemptions;
+    if (dto.coins_required !== undefined)            updateData.coins_required = dto.coins_required;
     if (dto.is_active !== undefined)                 updateData.is_active = Boolean(dto.is_active);
     if (dto.valid_from)                              updateData.valid_from = new Date(dto.valid_from + 'T00:00:00');
     if (dto.valid_until)                             updateData.valid_until = new Date(dto.valid_until + 'T23:59:59');
@@ -201,7 +203,7 @@ export class OffersService {
         'o.clicks AS clicks',
         'o.saves AS saves',
         userId
-          ? `EXISTS(SELECT 1 FROM saved_offers WHERE offer_id = o.id AND user_id = ${userId}) AS "isSaved"`
+          ? `EXISTS(SELECT 1 FROM saved_offers WHERE offer_id = o.id AND user_id = :savedUserId) AS "isSaved"`
           : `FALSE AS "isSaved"`,
         'v.business_name AS "businessName"',
         'v.logo_url AS "vendorLogo"',
@@ -216,6 +218,7 @@ export class OffersService {
       ])
       .where('o.id = :id', { id: offerId });
 
+    if (userId) qb.setParameter('savedUserId', userId);
     if (role !== 'admin') {
       qb.andWhere('o.is_active = true');
     }

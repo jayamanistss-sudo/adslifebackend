@@ -1,18 +1,20 @@
 import {
   Injectable, BadRequestException, NotFoundException,
-  ServiceUnavailableException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 import { PushService } from '../services/push.service';
-import axios from 'axios';
-import * as crypto from 'node:crypto';
 import { Payment, PaymentStatus } from '../entities/payment.entity';
 import { Vendor } from '../entities/vendor.entity';
 import { User } from '../entities/user.entity';
 import { SubscriptionPlan } from '../entities/subscription-plan.entity';
+import { SiteSetting } from '../entities/site-setting.entity';
+import { RazorpayService } from '../razorpay/razorpay.service';
 
+// Vendor subscription payments run entirely through Razorpay (same gateway as
+// banner ads) — create a Razorpay order, open Checkout on the client, then
+// confirm the HMAC signature server-side before activating the plan.
 @Injectable()
 export class PaymentService {
   constructor(
@@ -20,136 +22,101 @@ export class PaymentService {
     @InjectRepository(Vendor) private readonly vendorRepo: Repository<Vendor>,
     @InjectRepository(User) private readonly userRepo: Repository<User>,
     @InjectRepository(SubscriptionPlan) private readonly planRepo: Repository<SubscriptionPlan>,
+    @InjectRepository(SiteSetting) private readonly settingRepo: Repository<SiteSetting>,
     private readonly config: ConfigService,
     private readonly push: PushService,
+    private readonly razorpay: RazorpayService,
   ) {}
 
-  private get cashfreeBase() { return this.config.get<string>('cashfree.baseUrl'); }
-  private get appId() { return this.config.get<string>('cashfree.appId'); }
-  private get secretKey() { return this.config.get<string>('cashfree.secretKey'); }
-  private get webhookSecret() { return this.config.get<string>('cashfree.webhookSecret'); }
-  private get appUrl() { return this.config.get<string>('appUrl'); }
-  private get frontendUrl() { return this.config.get<string>('frontendUrl'); }
+  async getPublicConfig() {
+    return { key_id: process.env.RAZORPAY_KEY_ID ?? '', gateway: 'razorpay' };
+  }
 
   async createOrder(userId: number, planId: number, purpose = 'vendor_plan') {
     const plan = await this.planRepo.findOne({ where: { id: planId, is_active: true } });
     if (!plan) throw new NotFoundException('Plan not found');
 
-    if (Number.parseFloat(String(plan.price)) === 0) return { free: true, plan: plan.slug };
+    const price = Number.parseFloat(String(plan.price));
+    if (price === 0) return { free: true, plan: plan.slug };
 
     const user = await this.userRepo.findOne({ where: { id: userId }, select: ['name', 'email', 'phone'] });
     if (!user) throw new NotFoundException('User not found');
-    const orderId = 'AL_' + crypto.randomBytes(8).toString('hex').toUpperCase();
 
-    const payload = {
-      order_id: orderId,
-      order_amount: Number.parseFloat(String(plan.price)),
-      order_currency: 'INR',
-      customer_details: {
-        customer_id: `USR_${userId}`,
-        customer_name: user.name,
-        customer_email: user.email,
-        customer_phone: user.phone || '9999999999',
-      },
-      order_meta: {
-        return_url: `${this.frontendUrl}/vendor/select-plan?order_id=${orderId}`,
-        notify_url: `${this.appUrl}/api/payment/webhook`,
-      },
-    };
-
-    let cfResponse: any;
-    try {
-      const { data } = await axios.post(`${this.cashfreeBase}/orders`, payload, {
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-version': '2025-01-01',
-          'x-client-id': this.appId,
-          'x-client-secret': this.secretKey,
-        },
-      });
-      cfResponse = data;
-    } catch (e: any) {
-      throw new ServiceUnavailableException('Payment gateway error: ' + (e.response?.data?.message ?? 'Unknown'));
-    }
-
-    if (!cfResponse?.payment_session_id) {
-      throw new ServiceUnavailableException('Payment gateway error: ' + (cfResponse?.message ?? 'Unknown'));
-    }
+    // Razorpay works in paise; reuse the shared service (also used for banners).
+    const order = await this.razorpay.createOrder(
+      userId, Math.round(price * 100), 'INR', `plan_${plan.id}_${userId}`,
+    );
 
     await this.paymentRepo.save({
       user_id: userId,
-      order_id: orderId,
-      payment_session_id: cfResponse.payment_session_id,
+      order_id: order.order_id,
       amount: plan.price,
       purpose,
       reference_id: plan.id,
       reference_type: 'vendor_plan',
     });
 
-    return { order_id: orderId, payment_session_id: cfResponse.payment_session_id, amount: Number.parseFloat(String(plan.price)), plan: plan.slug };
+    return {
+      order_id: order.order_id,
+      key_id: order.key_id,
+      amount: order.amount,
+      currency: order.currency,
+      plan: plan.slug,
+      prefill: { name: user.name, email: user.email, contact: user.phone ?? '' },
+    };
   }
 
-  async verifyPayment(userId: number, orderId: string) {
+  // Called by the client after Razorpay Checkout succeeds. Verifies the
+  // signature, marks the payment paid and activates the vendor's plan.
+  async confirmPayment(
+    userId: number,
+    body: { razorpay_order_id: string; razorpay_payment_id: string; razorpay_signature: string },
+  ) {
+    const orderId = body.razorpay_order_id;
     const pay = await this.paymentRepo.findOne({ where: { order_id: orderId, user_id: userId } });
     if (!pay) throw new NotFoundException('Payment not found');
     if (pay.status === PaymentStatus.PAID) return { status: 'paid', order_id: orderId };
 
-    let cfResponse: any;
-    try {
-      const { data } = await axios.get(`${this.cashfreeBase}/orders/${orderId}/payments`, {
-        headers: { 'x-api-version': '2025-01-01', 'x-client-id': this.appId, 'x-client-secret': this.secretKey },
-      });
-      cfResponse = data;
-    } catch { cfResponse = []; }
-
-    let paid = false, cfPaymentId: string | null = null;
-    if (Array.isArray(cfResponse)) {
-      for (const p of cfResponse) {
-        if (p.payment_status === 'SUCCESS') { paid = true; cfPaymentId = p.cf_payment_id ?? null; break; }
-      }
-    }
-
-    if (paid) {
-      await this.paymentRepo.update(
-        { order_id: orderId },
-        { status: PaymentStatus.PAID, cashfree_payment_id: cfPaymentId, paid_at: new Date() },
-      );
-      await this.activateVendorPlan(pay);
-      return { status: 'paid', order_id: orderId };
-    }
-
-    return { status: cfResponse[0]?.payment_status ?? 'pending', order_id: orderId };
-  }
-
-  async handleWebhook(rawBody: string, timestamp: string, signature: string) {
-    if (!timestamp || !signature) throw new BadRequestException('Missing webhook signature headers');
-    if (!this.webhookSecret) throw new BadRequestException('Webhook secret not configured');
-
-    const expected = Buffer.from(
-      crypto.createHmac('sha256', this.webhookSecret).update(timestamp + rawBody).digest(),
-    ).toString('base64');
-    const expectedBuf = Buffer.from(expected);
-    const signatureBuf = Buffer.from(signature);
-    if (expectedBuf.length !== signatureBuf.length || !crypto.timingSafeEqual(expectedBuf, signatureBuf)) {
-      throw new BadRequestException('Invalid signature');
-    }
-
-    const event = JSON.parse(rawBody);
-    if (event.type !== 'PAYMENT_SUCCESS_WEBHOOK') return 'ok';
-
-    const data = event.data ?? {};
-    const orderId = data.order?.order_id ?? '';
-    const cfPid = data.payment?.cf_payment_id ?? null;
-    const status = data.payment?.payment_status ?? '';
-
-    if (status !== 'SUCCESS' || !orderId) return 'ok';
-
-    const pay = await this.paymentRepo.findOne({ where: { order_id: orderId } });
-    if (!pay || pay.status === PaymentStatus.PAID) return 'ok';
+    // Throws if the HMAC signature doesn't match.
+    await this.razorpay.verifyPayment(orderId, body.razorpay_payment_id, body.razorpay_signature);
 
     await this.paymentRepo.update(
       { order_id: orderId },
-      { status: PaymentStatus.PAID, cashfree_payment_id: cfPid, paid_at: new Date() },
+      { status: PaymentStatus.PAID, cashfree_payment_id: body.razorpay_payment_id, paid_at: new Date() },
+    );
+    await this.activateVendorPlan(pay);
+    return { status: 'paid', order_id: orderId };
+  }
+
+  // Backwards-compatible status check (no gateway polling — reads our record).
+  async verifyPayment(userId: number, orderId: string) {
+    const pay = await this.paymentRepo.findOne({ where: { order_id: orderId, user_id: userId } });
+    if (!pay) throw new NotFoundException('Payment not found');
+    return { status: pay.status === PaymentStatus.PAID ? 'paid' : 'pending', order_id: orderId };
+  }
+
+  // Razorpay webhook (optional — client confirm is the primary path). Verifies
+  // the webhook signature, then marks paid + activates on payment.captured.
+  async handleWebhook(rawBody: string, _timestamp: string, signature: string) {
+    const secret = process.env.RAZORPAY_WEBHOOK_SECRET ?? '';
+    if (!secret) return 'ok'; // webhook not configured — confirm flow handles it
+    const crypto = await import('node:crypto');
+    const expected = crypto.createHmac('sha256', secret).update(rawBody).digest('hex');
+    if (expected.length !== (signature?.length ?? 0) ||
+        !crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signature))) {
+      throw new BadRequestException('Invalid signature');
+    }
+    const event = JSON.parse(rawBody);
+    if (event.event !== 'payment.captured' && event.event !== 'order.paid') return 'ok';
+    const orderId = event.payload?.payment?.entity?.order_id
+      ?? event.payload?.order?.entity?.id ?? '';
+    const paymentId = event.payload?.payment?.entity?.id ?? null;
+    if (!orderId) return 'ok';
+    const pay = await this.paymentRepo.findOne({ where: { order_id: orderId } });
+    if (!pay || pay.status === PaymentStatus.PAID) return 'ok';
+    await this.paymentRepo.update(
+      { order_id: orderId },
+      { status: PaymentStatus.PAID, cashfree_payment_id: paymentId, paid_at: new Date() },
     );
     await this.activateVendorPlan(pay);
     return 'ok';
@@ -158,7 +125,7 @@ export class PaymentService {
   private async activateVendorPlan(pay: Payment) {
     if (pay.reference_type !== 'vendor_plan' || !pay.reference_id) return;
 
-    // Guard against webhook retries re-extending an already-active plan
+    // Guard against retries re-extending an already-active plan
     const vendor = await this.vendorRepo.findOne({
       where: { user_id: pay.user_id },
       select: ['id', 'subscription_plan', 'plan_expires_at'],

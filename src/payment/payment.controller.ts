@@ -15,6 +15,13 @@ import { CreateOrderDto, VerifyPaymentQueryDto } from './dto/payment.dto';
 export class PaymentController {
   constructor(private readonly paymentService: PaymentService) {}
 
+  @Public()
+  @Get('config')
+  async publicConfig() {
+    const data = await this.paymentService.getPublicConfig();
+    return { success: true, data };
+  }
+
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @Post('create-order')
@@ -24,6 +31,17 @@ export class PaymentController {
       dto.plan_id,
       dto.purpose ?? 'vendor_plan',
     );
+    return { success: true, data };
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @Post('confirm')
+  async confirm(
+    @CurrentUser() user: any,
+    @Body() body: { razorpay_order_id: string; razorpay_payment_id: string; razorpay_signature: string },
+  ) {
+    const data = await this.paymentService.confirmPayment(user.user_id, body);
     return { success: true, data };
   }
 

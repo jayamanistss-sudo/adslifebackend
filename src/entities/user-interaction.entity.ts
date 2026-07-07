@@ -13,6 +13,7 @@ export enum InteractionAction {
   SHARE = 'share',
   SKIP = 'skip',
   SEARCH = 'search',
+  DIRECTION = 'direction',
 }
 
 @Entity('user_interactions')

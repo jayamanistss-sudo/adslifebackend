@@ -19,8 +19,11 @@ import { entities } from '../entities';
         password: config.get('database.pass'),
         entities: entities,
         synchronize: false,
+        // node-postgres pool options ("connectionLimit" is the MySQL driver's
+        // key and was silently ignored — pg expects "max").
         extra: {
-          connectionLimit: 10,
+          max: 10,
+          idleTimeoutMillis: 30000,
         },
       }),
     }),
