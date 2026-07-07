@@ -41,6 +41,12 @@ export class NotificationsController {
     return { success: true, data };
   }
 
+  @Delete(':id')
+  async deleteOne(@CurrentUser() user: any, @Param('id', ParseIntPipe) id: number) {
+    const data = await this.notificationsService.deleteOne(user.user_id, id);
+    return { success: true, data };
+  }
+
   @Post('save-token')
   async saveToken(@CurrentUser() user: any, @Body() dto: SaveTokenDto) {
     if (!dto.token) return { success: true, data: null };

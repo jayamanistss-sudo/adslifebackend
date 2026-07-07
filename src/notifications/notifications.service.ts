@@ -48,6 +48,13 @@ export class NotificationsService {
     return { cleared: true };
   }
 
+  async deleteOne(userId: number, notificationId: number) {
+    // Scoped to user_id so a notification id can't be used to delete
+    // another user's row.
+    await this.notifRepo.delete({ id: notificationId, user_id: userId });
+    return { deleted: true };
+  }
+
   async saveToken(userId: number, token: string, platform = 'web') {
     const existing = await this.userFcmTokenRepo.findOne({ where: { token } });
     if (existing) {

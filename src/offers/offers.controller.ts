@@ -69,10 +69,11 @@ export class OffersController {
   }
 
   @Public()
+  @UseGuards(OptionalJwtAuthGuard)
   @Post(':id/view')
-  async trackView(@Param('id', ParseIntPipe) id: number, @Req() req: Request) {
+  async trackView(@CurrentUser() user: any, @Param('id', ParseIntPipe) id: number, @Req() req: Request) {
     const ip = (req as any).headers['x-forwarded-for']?.split(',')[0]?.trim() ?? (req as any).socket?.remoteAddress ?? 'unknown';
-    await this.offersService.trackView(id, ip);
+    await this.offersService.trackView(id, ip, user?.user_id);
     return { success: true };
   }
 

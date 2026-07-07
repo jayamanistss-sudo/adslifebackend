@@ -15,6 +15,7 @@ import { Vendor } from '../entities/vendor.entity';
 import { VendorFollower } from '../entities/vendor-follower.entity';
 import { User } from '../entities/user.entity';
 import { SubscriptionPlan } from '../entities/subscription-plan.entity';
+import { UserInteraction, InteractionAction } from '../entities/user-interaction.entity';
 import { OfferReviewsService } from './offer-reviews.service';
 
 @Injectable()
@@ -25,6 +26,7 @@ export class OffersService {
     @InjectRepository(VendorFollower) private readonly vendorFollowerRepo: Repository<VendorFollower>,
     @InjectRepository(User) private readonly userRepo: Repository<User>,
     @InjectRepository(SubscriptionPlan) private readonly planRepo: Repository<SubscriptionPlan>,
+    @InjectRepository(UserInteraction) private readonly userInteractionRepo: Repository<UserInteraction>,
     private readonly push: PushService,
     private readonly gateway: NotificationsGateway,
     private readonly mail: MailService,
@@ -250,14 +252,36 @@ export class OffersService {
     };
   }
 
-  async trackView(offerId: number, ip: string) {
-    // Deduplicate by IP: one view per IP per offer per hour stored in a simple in-memory map.
-    // This prevents page-refresh spam without requiring auth.
+  async trackView(offerId: number, ip: string, userId?: number) {
+    if (userId) {
+      // Signed-in users: dedupe against user_interactions (DB-backed, so it
+      // survives restarts/redeploys and is correct across instances — unlike
+      // the IP+in-memory fallback below, which resets on every deploy).
+      const since = new Date(Date.now() - 3600000);
+      const recent = await this.userInteractionRepo
+        .createQueryBuilder('ui')
+        .where('ui.user_id = :userId AND ui.offer_id = :offerId AND ui.action = :action AND ui.created_at >= :since',
+          { userId, offerId, action: InteractionAction.VIEW, since })
+        .getCount();
+      if (recent > 0) return;
+      await this.userInteractionRepo.insert({ user_id: userId, offer_id: offerId, action: InteractionAction.VIEW });
+      await this.offerRepo.increment({ id: offerId }, 'views', 1);
+      return;
+    }
+
+    // Anonymous: no stable identity beyond IP, so fall back to an in-memory
+    // one-view-per-IP-per-hour cache. Opportunistically evict stale entries
+    // so this map can't grow without bound over the process lifetime.
     const key = `${ip}:${offerId}`;
     const now = Date.now();
     const lastSeen = OffersService.viewCache.get(key) ?? 0;
     if (now - lastSeen < 3600000) return;
     OffersService.viewCache.set(key, now);
+    if (OffersService.viewCache.size > 50000) {
+      for (const [k, t] of OffersService.viewCache) {
+        if (now - t >= 3600000) OffersService.viewCache.delete(k);
+      }
+    }
     await this.offerRepo.increment({ id: offerId }, 'views', 1);
   }
 
