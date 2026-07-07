@@ -1,8 +1,11 @@
 name: Deploy Backend
 
+# NOTE: only dev/prod are live right now — there is no test.adslife.in /
+# adslife-backend-test on the server yet. Add "test" back to both the
+# trigger and the branch map once that environment actually exists.
 on:
   push:
-    branches: [dev, test, prod]
+    branches: [dev, prod]
 
 jobs:
   deploy:
@@ -15,17 +18,15 @@ jobs:
         run: |
           BRANCH="${{ github.ref_name }}"
           if [ "$BRANCH" = "prod" ]; then
-            echo "path=/var/www/adslife-backend" >> $GITHUB_OUTPUT
-            echo "pm2=adslife-backend" >> $GITHUB_OUTPUT
-            echo "env=PRODUCTION" >> $GITHUB_OUTPUT
-          elif [ "$BRANCH" = "test" ]; then
-            echo "path=/var/www/adslife-backend-test" >> $GITHUB_OUTPUT
-            echo "pm2=adslife-backend-test" >> $GITHUB_OUTPUT
-            echo "env=TEST" >> $GITHUB_OUTPUT
+            echo "path=/var/www/adslife-backend-prod" >> $GITHUB_OUTPUT
+            echo "pm2=adslife-backend-prod" >> $GITHUB_OUTPUT
+            echo "port=3002" >> $GITHUB_OUTPUT
+            echo "env=PRODUCTION (adslife.in)" >> $GITHUB_OUTPUT
           else
             echo "path=/var/www/adslife-backend-dev" >> $GITHUB_OUTPUT
             echo "pm2=adslife-backend-dev" >> $GITHUB_OUTPUT
-            echo "env=DEV" >> $GITHUB_OUTPUT
+            echo "port=3001" >> $GITHUB_OUTPUT
+            echo "env=DEV (dev.adslife.in)" >> $GITHUB_OUTPUT
           fi
 
       - name: Upload source files
@@ -46,11 +47,15 @@ jobs:
           script: |
             set -e
             cd ${{ steps.cfg.outputs.path }}
-            [ ! -d node_modules ] && cp -r /var/www/adslife-backend/node_modules . || true
+            [ ! -d node_modules ] && cp -r /var/www/adslife-backend-prod/node_modules . || true
             npm install --legacy-peer-deps --silent
             npm run build
             pm2 restart ${{ steps.cfg.outputs.pm2 }} || pm2 start dist/main.js --name ${{ steps.cfg.outputs.pm2 }}
             pm2 save
+            sleep 4
+            curl -sf -o /dev/null http://127.0.0.1:${{ steps.cfg.outputs.port }}/api/categories \
+              && echo "Health check passed on port ${{ steps.cfg.outputs.port }}" \
+              || (echo "Health check FAILED on port ${{ steps.cfg.outputs.port }}" && exit 1)
 
       - name: Done
         run: echo "Backend deployed to ${{ steps.cfg.outputs.env }} from branch ${{ github.ref_name }}"
