@@ -35,10 +35,11 @@ export class FeedController {
     @Query('category') category = '',
     @Query('distance', new DefaultValuePipe(0), ParseFloatPipe) distance: number,
     @Query('filter') filter = '',
+    @Query('sort') sort = '',
   ) {
     const userId = user?.user_id ?? 0;
     const { offers, total } = await this.feedService.personalized(
-      userId, lat, lng, page, perPage, q, category, distance, filter);
+      userId, lat, lng, page, perPage, q, category, distance, filter, sort);
     return { success: true, data: offers, total };
   }
 
@@ -54,9 +55,10 @@ export class FeedController {
     @Query('category') category = '',
     @Query('distance', new DefaultValuePipe(0), ParseFloatPipe) distance: number,
     @Query('filter') filter = '',
+    @Query('sort') sort = '',
   ) {
     const { offers, total } = await this.feedService.trending(
-      city, lat, lng, page, perPage, q, category, distance, filter);
+      city, lat, lng, page, perPage, q, category, distance, filter, sort);
     return { success: true, data: offers, total };
   }
 

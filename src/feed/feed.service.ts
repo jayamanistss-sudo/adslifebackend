@@ -85,7 +85,7 @@ export class FeedService {
 
   async personalized(
     userId: number, lat: number, lng: number, page: number, perPage = 20, search = '',
-    category = '', distanceKm = 0, filter = '',
+    category = '', distanceKm = 0, filter = '', sort = '',
   ) {
     const limit = clampLimit(perPage, 20, 500);
     const offset = (Math.max(page, 1) - 1) * limit;
@@ -179,9 +179,16 @@ export class FeedService {
 
     const { total } = await countQb.getRawOne();
 
-    // Nearest offers first when we know where the user is; vendors without
-    // coordinates go last. Score/recency break ties at the same distance.
-    if (lat && lng) {
+    // Explicit sort choice (from the feed's sort dropdown) overrides the
+    // default relevance ordering — done server-side so pagination stays
+    // correct instead of only sorting whatever page happened to be fetched.
+    if (sort === 'discount') {
+      qb.orderBy('o.discount_percent', 'DESC', 'NULLS LAST').addOrderBy('o.created_at', 'DESC');
+    } else if (sort === 'views') {
+      qb.orderBy('o.views', 'DESC', 'NULLS LAST').addOrderBy('o.created_at', 'DESC');
+    } else if (lat && lng) {
+      // Nearest offers first when we know where the user is; vendors without
+      // coordinates go last. Score/recency break ties at the same distance.
       qb.orderBy(distExpr, 'ASC', 'NULLS LAST')
         .addOrderBy('score', 'DESC')
         .addOrderBy('o.created_at', 'DESC');
@@ -207,7 +214,7 @@ export class FeedService {
 
   async trending(
     city: string, lat: number, lng: number, page: number, perPage = 20, search = '',
-    category = '', distanceKm = 0, filter = '',
+    category = '', distanceKm = 0, filter = '', sort = '',
   ) {
     const limit = clampLimit(perPage, 20, 500);
     const offset = (Math.max(page, 1) - 1) * limit;
@@ -267,9 +274,15 @@ export class FeedService {
     const countRow = await countQb.getRawOne();
     const total = countRow?.total ?? 0;
 
+    if (sort === 'discount') {
+      qb.orderBy('o.discount_percent', 'DESC', 'NULLS LAST').addOrderBy('o.created_at', 'DESC');
+    } else if (sort === 'views') {
+      qb.orderBy('o.views', 'DESC', 'NULLS LAST').addOrderBy('o.created_at', 'DESC');
+    } else {
+      qb.orderBy('popularity', 'DESC').addOrderBy('o.created_at', 'DESC');
+    }
+
     const offers = await qb
-      .orderBy('popularity', 'DESC')
-      .addOrderBy('o.created_at', 'DESC')
       .limit(limit)
       .offset(offset)
       .getRawMany();

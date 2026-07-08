@@ -1,5 +1,5 @@
 import {
-  Controller, Get, Post, Put, Body, Param, ParseIntPipe, UseGuards,
+  Controller, Get, Post, Put, Delete, Body, Param, ParseIntPipe, UseGuards,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -11,6 +11,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Public } from '../common/decorators/public.decorator';
 import { SubscriptionPlan } from '../entities/subscription-plan.entity';
+import { Vendor } from '../entities/vendor.entity';
 import { CreatePlanDto, UpdatePlanDto } from './dto/plans.dto';
 
 @ApiTags('plans')
@@ -18,6 +19,7 @@ import { CreatePlanDto, UpdatePlanDto } from './dto/plans.dto';
 export class PlansController {
   constructor(
     @InjectRepository(SubscriptionPlan) private readonly planRepo: Repository<SubscriptionPlan>,
+    @InjectRepository(Vendor) private readonly vendorRepo: Repository<Vendor>,
   ) {}
 
   @Public()
@@ -66,5 +68,25 @@ export class PlansController {
     if (!Object.keys(updateData).length) return { success: false, error: 'Nothing to update' };
     await this.planRepo.update(id, updateData);
     return { success: true, data: { updated: true } };
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @ApiBearerAuth()
+  @Roles('admin')
+  @Delete(':id')
+  async remove(@Param('id', ParseIntPipe) id: number) {
+    const plan = await this.planRepo.findOne({ where: { id } });
+    if (!plan) return { success: false, error: 'Plan not found' };
+
+    const inUse = await this.vendorRepo.count({ where: { subscription_plan: plan.slug } });
+    if (inUse > 0) {
+      return {
+        success: false,
+        error: `${inUse} vendor${inUse === 1 ? ' is' : 's are'} currently on this plan — deactivate it instead of deleting`,
+      };
+    }
+
+    await this.planRepo.delete(id);
+    return { success: true, data: { deleted: true } };
   }
 }
