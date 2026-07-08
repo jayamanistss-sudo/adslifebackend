@@ -1,8 +1,12 @@
-import { Module } from '@nestjs/common';
+import { Global, Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { NotificationsGateway } from './notifications.gateway';
 
+// Global — PushService is instantiated separately in 6 different feature
+// modules and needs NotificationsGateway in all of them to emit realtime
+// events; @Global() avoids importing GatewayModule into each one individually.
+@Global()
 @Module({
   imports: [
     JwtModule.registerAsync({

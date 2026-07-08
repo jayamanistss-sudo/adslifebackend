@@ -55,6 +55,14 @@ export class NotificationsService {
     return { deleted: true };
   }
 
+  async removeToken(userId: number, token: string) {
+    // Scoped to user_id too — a client can only ever know its own token
+    // value, but this keeps a compromised/leaked token from being used to
+    // deregister an arbitrary other device.
+    await this.userFcmTokenRepo.delete({ token, user_id: userId });
+    return { removed: true };
+  }
+
   async saveToken(userId: number, token: string, platform = 'web') {
     const existing = await this.userFcmTokenRepo.findOne({ where: { token } });
     if (existing) {

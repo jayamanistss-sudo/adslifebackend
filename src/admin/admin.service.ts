@@ -16,6 +16,7 @@ import { SubscriptionPlan } from '../entities/subscription-plan.entity';
 import { FraudFlag, FraudFlagStatus } from '../entities/fraud-flag.entity';
 import { Payment } from '../entities/payment.entity';
 import { clampLimit } from '../common/utils/pagination';
+import { NotificationSettingsService } from '../notification-settings/notification-settings.service';
 
 @Injectable()
 export class AdminService {
@@ -35,6 +36,7 @@ export class AdminService {
     private readonly push: PushService,
     private readonly mail: MailService,
     private readonly monitoring: MonitoringService,
+    private readonly notificationSettings: NotificationSettingsService,
   ) {}
 
   async getStats() {
@@ -234,10 +236,14 @@ export class AdminService {
 
     if (status === 'approved') {
       await this.push.send(app.user_id, 'Vendor Approved!', 'Your vendor account has been approved. Start adding offers now!', { type: 'vendor_approved' });
-      if (user?.email) await this.mail.sendVendorApprovedEmail(user.email, user.name, app.business_name);
+      if (user?.email && await this.notificationSettings.isEnabled('vendor_approved', 'email')) {
+        await this.mail.sendVendorApprovedEmail(user.email, user.name, app.business_name);
+      }
     } else {
       await this.push.send(app.user_id, 'Vendor Application Update', note || 'Your vendor application was not approved this time.', { type: 'vendor_rejected' });
-      if (user?.email) await this.mail.sendVendorRejectedEmail(user.email, user.name, app.business_name, note);
+      if (user?.email && await this.notificationSettings.isEnabled('vendor_rejected', 'email')) {
+        await this.mail.sendVendorRejectedEmail(user.email, user.name, app.business_name, note);
+      }
     }
 
     return { updated: true };

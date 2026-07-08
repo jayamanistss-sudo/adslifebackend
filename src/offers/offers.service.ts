@@ -8,8 +8,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { CreateOfferDto, UpdateOfferDto } from './dto/create-offer.dto';
 import { PushService } from '../services/push.service';
-import { NotificationsGateway } from '../gateway/notifications.gateway';
 import { MailService } from '../mail/mail.service';
+import { NotificationSettingsService } from '../notification-settings/notification-settings.service';
 import { Offer } from '../entities/offer.entity';
 import { Vendor } from '../entities/vendor.entity';
 import { VendorFollower } from '../entities/vendor-follower.entity';
@@ -28,8 +28,8 @@ export class OffersService {
     @InjectRepository(SubscriptionPlan) private readonly planRepo: Repository<SubscriptionPlan>,
     @InjectRepository(UserInteraction) private readonly userInteractionRepo: Repository<UserInteraction>,
     private readonly push: PushService,
-    private readonly gateway: NotificationsGateway,
     private readonly mail: MailService,
+    private readonly notificationSettings: NotificationSettingsService,
     private readonly offerReviewsService: OfferReviewsService,
   ) {}
 
@@ -96,22 +96,16 @@ export class OffersService {
     const discount = discountPercent ? ` — ${discountPercent}% OFF` : '';
     const notifTitle = `New offer from ${vendor.business_name}`;
     const notifBody  = `${title}${discount}`;
-    const payload = {
-      type:       'new_offer',
-      offer_id:   offerId,
-      vendor_id:  vendorId,
-      title:      notifTitle,
-      body:       notifBody,
-      created_at: new Date().toISOString(),
-    };
 
-    this.gateway.sendToUsers(userIds, 'notification', payload);
-
+    // push.send() handles the in-app row, the realtime Socket.IO emit, and
+    // the FCM push together — each gated by the admin's per-activity toggle.
     await this.push.send(userIds, notifTitle, notifBody, {
       type:      'new_offer',
       offer_id:  String(offerId),
       vendor_id: String(vendorId),
     });
+
+    if (!(await this.notificationSettings.isEnabled('new_offer', 'email'))) return;
 
     // Email alerts: find subscribers who have email_alerts enabled
     const users = await this.userRepo.find({

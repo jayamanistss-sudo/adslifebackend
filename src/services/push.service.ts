@@ -8,6 +8,8 @@ import axios from 'axios';
 import { UserFcmToken } from '../entities/user-fcm-token.entity';
 import { Notification } from '../entities/notification.entity';
 import { NotificationOutbox, NotificationOutboxStatus } from '../entities/notification-outbox.entity';
+import { NotificationSettingsService } from '../notification-settings/notification-settings.service';
+import { NotificationsGateway } from '../gateway/notifications.gateway';
 
 interface PushResult {
   sent: number;
@@ -24,6 +26,8 @@ export class PushService {
     @InjectRepository(UserFcmToken) private readonly userFcmTokenRepo: Repository<UserFcmToken>,
     @InjectRepository(Notification) private readonly notifRepo: Repository<Notification>,
     @InjectRepository(NotificationOutbox) private readonly outboxRepo: Repository<NotificationOutbox>,
+    private readonly settings: NotificationSettingsService,
+    private readonly gateway: NotificationsGateway,
   ) {}
 
   private getServiceAccount(): any {
@@ -81,20 +85,37 @@ export class PushService {
     const ids = Array.isArray(userIds) ? userIds : [userIds];
     if (!ids.length) return 0;
 
+    const type = data.type ?? 'push';
+    const [inAppOn, pushOn] = await Promise.all([
+      this.settings.isEnabled(type, 'in_app'),
+      this.settings.isEnabled(type, 'push'),
+    ]);
+
     // The in-app notification (bell icon / notifications list) must not
     // depend on FCM succeeding — users without a registered push token, or
     // any time the FCM/OAuth pipeline is down, should still see it in-app.
-    const offerId = data.offer_id ? +data.offer_id : null;
-    await this.notifRepo.insert(
-      ids.map((uid) => ({
-        user_id: uid,
-        title,
-        body,
-        type: data.type ?? 'push',
-        offer_id: offerId,
-        is_read: false,
-      })),
-    );
+    if (inAppOn) {
+      const offerId = data.offer_id ? +data.offer_id : null;
+      await this.notifRepo.insert(
+        ids.map((uid) => ({
+          user_id: uid,
+          title,
+          body,
+          type,
+          offer_id: offerId,
+          is_read: false,
+        })),
+      );
+
+      // Realtime — the live counterpart of the in-app row, for users
+      // currently connected via Socket.IO. Every notification type gets
+      // this now (previously only wired for new-offer-to-followers).
+      this.gateway.sendToUsers(ids, 'notification', {
+        type, title, body, ...data, created_at: new Date().toISOString(),
+      });
+    }
+
+    if (!pushOn) return 0;
 
     const result = await this.pushOnly(ids, title, body, data);
 
@@ -144,7 +165,13 @@ export class PushService {
 
         if (resp.data?.name) sent++;
       } catch (e: any) {
-        if (e.response?.data?.error?.details?.some((d: any) => d.errorCode === 'UNREGISTERED')) {
+        // UNREGISTERED = token rotated/app uninstalled; INVALID_ARGUMENT here
+        // means the token field itself is malformed (every other field in
+        // this request is identical across the loop) — both mean this
+        // specific token will never work again, so purge either way instead
+        // of leaving a dead token to fail forever on every future send.
+        const code = e.response?.data?.error?.details?.find((d: any) => d.errorCode)?.errorCode;
+        if (code === 'UNREGISTERED' || code === 'INVALID_ARGUMENT') {
           stale.push(token);
         } else {
           const msg = JSON.stringify(e.response?.data ?? e.message);

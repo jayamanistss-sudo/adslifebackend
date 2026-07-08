@@ -5,6 +5,7 @@ import {
 import { ApiTags, ApiBearerAuth, ApiBody } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { AdminService } from './admin.service';
+import { NotificationSettingsService } from '../notification-settings/notification-settings.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -23,7 +24,29 @@ import {
 @Roles('admin')
 @Controller('admin')
 export class AdminController {
-  constructor(private readonly adminService: AdminService) {}
+  constructor(
+    private readonly adminService: AdminService,
+    private readonly notificationSettings: NotificationSettingsService,
+  ) {}
+
+  @Get('notification-settings')
+  async getNotificationSettings() {
+    const data = await this.notificationSettings.getAll();
+    return { success: true, data };
+  }
+
+  @Put('notification-settings/:type')
+  @ApiBody({ schema: { properties: {
+    email_enabled: { type: 'boolean' }, push_enabled: { type: 'boolean' }, in_app_enabled: { type: 'boolean' },
+  } } })
+  async updateNotificationSetting(
+    @Param('type') type: string,
+    @Body() body: { email_enabled?: boolean; push_enabled?: boolean; in_app_enabled?: boolean },
+  ) {
+    const data = await this.notificationSettings.update(type, body);
+    if (!data) return { success: false, error: 'Unknown notification type' };
+    return { success: true, data };
+  }
 
   @Get('stats')
   async stats() {

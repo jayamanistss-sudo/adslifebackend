@@ -40,6 +40,7 @@ import { VendorApplyModule } from './vendor-apply/vendor-apply.module';
 import { ReferralModule } from './referral/referral.module';
 import { InviteModule } from './invite/invite.module';
 import { GatewayModule } from './gateway/gateway.module';
+import { NotificationSettingsModule } from './notification-settings/notification-settings.module';
 
 @Module({
   imports: [
@@ -50,6 +51,7 @@ import { GatewayModule } from './gateway/gateway.module';
 
     // MonitoringModule must be first so it's available globally
     MonitoringModule,
+    NotificationSettingsModule,
 
     AuthModule,
     OffersModule,

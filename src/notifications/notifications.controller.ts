@@ -41,6 +41,16 @@ export class NotificationsController {
     return { success: true, data };
   }
 
+  // Called on logout so this device stops receiving pushes meant for this
+  // user — without it, a shared/public device keeps getting an ex-user's
+  // notifications until FCM eventually declares the token dead on its own.
+  @Delete('token')
+  async removeToken(@CurrentUser() user: any, @Body('token') token: string) {
+    if (!token) return { success: true, data: null };
+    const data = await this.notificationsService.removeToken(user.user_id, token);
+    return { success: true, data };
+  }
+
   @Delete(':id')
   async deleteOne(@CurrentUser() user: any, @Param('id', ParseIntPipe) id: number) {
     const data = await this.notificationsService.deleteOne(user.user_id, id);

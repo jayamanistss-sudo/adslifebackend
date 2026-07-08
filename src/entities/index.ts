@@ -39,6 +39,7 @@ export { OfferReview } from './offer-review.entity';
 export { OfferReport, OfferReportReason } from './offer-report.entity';
 export { NotificationOutbox, NotificationOutboxStatus } from './notification-outbox.entity';
 export { EmailChangeRequest } from './email-change-request.entity';
+export { NotificationSetting } from './notification-setting.entity';
 
 import { User } from './user.entity';
 import { Vendor } from './vendor.entity';
@@ -82,6 +83,7 @@ import { OfferReport } from './offer-report.entity';
 import { NotificationOutbox } from './notification-outbox.entity';
 import { RedemptionCode } from './redemption-code.entity';
 import { EmailChangeRequest } from './email-change-request.entity';
+import { NotificationSetting } from './notification-setting.entity';
 
 export const entities = [
   User,
@@ -126,4 +128,5 @@ export const entities = [
   NotificationOutbox,
   EmailChangeRequest,
   RedemptionCode,
+  NotificationSetting,
 ];
