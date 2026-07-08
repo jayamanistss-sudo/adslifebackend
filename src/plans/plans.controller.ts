@@ -13,6 +13,7 @@ import { Public } from '../common/decorators/public.decorator';
 import { SubscriptionPlan } from '../entities/subscription-plan.entity';
 import { Vendor } from '../entities/vendor.entity';
 import { CreatePlanDto, UpdatePlanDto } from './dto/plans.dto';
+import { PlanFeaturesService } from '../plan-features/plan-features.service';
 
 @ApiTags('plans')
 @Controller('plans')
@@ -20,6 +21,7 @@ export class PlansController {
   constructor(
     @InjectRepository(SubscriptionPlan) private readonly planRepo: Repository<SubscriptionPlan>,
     @InjectRepository(Vendor) private readonly vendorRepo: Repository<Vendor>,
+    private readonly planFeatures: PlanFeaturesService,
   ) {}
 
   @Public()
@@ -46,6 +48,7 @@ export class PlansController {
       duration_days: dto.duration_days ?? 30,
       max_offers: dto.max_offers ?? null,
       features: dto.features ?? [],
+      feature_flags: dto.feature_flags ?? [],
       is_active: true,
     });
     return { success: true, data: { id: plan.id } };
@@ -63,10 +66,12 @@ export class PlansController {
     if (dto.duration_days !== undefined) updateData.duration_days = dto.duration_days;
     if (dto.max_offers !== undefined) updateData.max_offers    = dto.max_offers;
     if (dto.features   !== undefined) updateData.features      = dto.features;
+    if (dto.feature_flags !== undefined) updateData.feature_flags = dto.feature_flags;
     if (dto.is_active  !== undefined) updateData.is_active     = dto.is_active === 1;
 
     if (!Object.keys(updateData).length) return { success: false, error: 'Nothing to update' };
     await this.planRepo.update(id, updateData);
+    this.planFeatures.invalidateCache();
     return { success: true, data: { updated: true } };
   }
 

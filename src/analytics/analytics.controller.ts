@@ -12,6 +12,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Vendor } from '../entities/vendor.entity';
 import { RoiQueryDto, AudienceQueryDto, HeatmapQueryDto, BenchmarkQueryDto } from './dto/analytics.dto';
+import { PlanFeaturesService } from '../plan-features/plan-features.service';
 
 @ApiTags('analytics')
 @ApiBearerAuth()
@@ -22,6 +23,7 @@ export class AnalyticsController {
   constructor(
     private readonly analyticsService: AnalyticsService,
     @InjectRepository(Vendor) private readonly vendorRepo: Repository<Vendor>,
+    private readonly planFeatures: PlanFeaturesService,
   ) {}
 
   private async resolveVendorId(user: any, queryVendorId?: number): Promise<number> {
@@ -31,6 +33,9 @@ export class AnalyticsController {
     }
     const vendor = await this.vendorRepo.findOne({ where: { user_id: user.user_id }, select: ['id'] });
     if (!vendor) throw new ForbiddenException('Vendor profile not found');
+    if (!(await this.planFeatures.vendorHasFeature(vendor.id, 'advanced_analytics'))) {
+      throw new ForbiddenException("Analytics isn't included in your current plan. Upgrade to unlock it.");
+    }
     return vendor.id;
   }
 

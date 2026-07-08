@@ -14,6 +14,7 @@ import { RequestSpotlightDto, ApproveSpotlightDto } from './dto/spotlight.dto';
 import { PushService } from '../services/push.service';
 import { MailService } from '../mail/mail.service';
 import { NotificationSettingsService } from '../notification-settings/notification-settings.service';
+import { PlanFeaturesService } from '../plan-features/plan-features.service';
 
 @ApiTags('spotlight')
 @Controller('spotlight')
@@ -25,6 +26,7 @@ export class SpotlightController {
     private readonly push: PushService,
     private readonly mail: MailService,
     private readonly notificationSettings: NotificationSettingsService,
+    private readonly planFeatures: PlanFeaturesService,
   ) {}
 
   @Public()
@@ -90,6 +92,10 @@ export class SpotlightController {
   async request(@CurrentUser() user: any, @Body() dto: RequestSpotlightDto) {
     const vendor = await this.vendorRepo.findOne({ where: { user_id: user.user_id }, select: ['id'] });
     if (!vendor) return { success: false, error: 'Vendor not found' };
+
+    if (user.role !== 'admin' && !(await this.planFeatures.vendorHasFeature(vendor.id, 'spotlight'))) {
+      return { success: false, error: 'Spotlight isn\'t included in your current plan. Upgrade to unlock it.', code: 'PLAN_FEATURE_LOCKED' };
+    }
 
     const spotlight = await this.spotlightRepo.save({
       vendor_id: vendor.id,

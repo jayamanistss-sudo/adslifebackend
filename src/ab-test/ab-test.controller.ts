@@ -9,6 +9,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Vendor } from '../entities/vendor.entity';
 import { CreateAbTestDto, ConcludeAbTestDto } from './dto/ab-test.dto';
+import { PlanFeaturesService } from '../plan-features/plan-features.service';
 
 @ApiTags('ab-test')
 @ApiBearerAuth()
@@ -19,6 +20,7 @@ export class AbTestController {
   constructor(
     private readonly abTestService: AbTestService,
     @InjectRepository(Vendor) private readonly vendorRepo: Repository<Vendor>,
+    private readonly planFeatures: PlanFeaturesService,
   ) {}
 
   private async resolveVendorId(user: any): Promise<number> {
@@ -30,6 +32,9 @@ export class AbTestController {
   @Post('create')
   async create(@CurrentUser() user: any, @Body() dto: CreateAbTestDto) {
     const vendorId = await this.resolveVendorId(user);
+    if (user.role !== 'admin' && !(await this.planFeatures.vendorHasFeature(vendorId, 'advanced_analytics'))) {
+      throw new ForbiddenException("A/B testing isn't included in your current plan. Upgrade to unlock it.");
+    }
     const data = await this.abTestService.create(vendorId, dto);
     return { success: true, data };
   }

@@ -28,6 +28,12 @@ export class SubscriptionPlan {
   @Column({ type: 'json', nullable: true })
   features: any | null;
 
+  // Marketing copy in `features` is free text and never checked by code.
+  // This is the actual enforcement source — canonical keys from
+  // PLAN_FEATURE_KEYS in plan-features.service.ts.
+  @Column({ type: 'json', default: () => "'[]'" })
+  feature_flags: string[];
+
   @Column({ type: 'boolean', default: true })
   is_active: boolean;
 

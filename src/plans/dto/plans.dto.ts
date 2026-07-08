@@ -44,6 +44,12 @@ export class CreatePlanDto {
   @IsArray()
   @IsString({ each: true })
   features?: string[] = [];
+
+  @ApiPropertyOptional({ example: ['banner_ads', 'spotlight', 'advanced_analytics'] })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  feature_flags?: string[] = [];
 }
 
 export class UpdatePlanDto {
@@ -85,6 +91,12 @@ export class UpdatePlanDto {
   @IsArray()
   @IsString({ each: true })
   features?: string[];
+
+  @ApiPropertyOptional({ example: ['banner_ads', 'spotlight', 'advanced_analytics'] })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  feature_flags?: string[];
 
   @ApiPropertyOptional({ enum: [0, 1] })
   @IsOptional()

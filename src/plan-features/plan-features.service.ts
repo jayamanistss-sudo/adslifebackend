@@ -1,0 +1,45 @@
+import { Injectable } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { SubscriptionPlan } from '../entities/subscription-plan.entity';
+import { Vendor } from '../entities/vendor.entity';
+
+// Canonical, code-checked feature keys — separate from the free-text
+// `features` marketing bullets, which nothing ever reads. Add new gated
+// features here as they're built.
+export const PLAN_FEATURE_KEYS = ['banner_ads', 'spotlight', 'advanced_analytics'] as const;
+export type PlanFeatureKey = (typeof PLAN_FEATURE_KEYS)[number];
+
+@Injectable()
+export class PlanFeaturesService {
+  private cache = new Map<string, string[]>();
+  private cacheLoadedAt = 0;
+  private readonly CACHE_TTL_MS = 30_000;
+
+  constructor(
+    @InjectRepository(SubscriptionPlan) private readonly planRepo: Repository<SubscriptionPlan>,
+    @InjectRepository(Vendor) private readonly vendorRepo: Repository<Vendor>,
+  ) {}
+
+  private async ensureCache(): Promise<void> {
+    if (Date.now() - this.cacheLoadedAt < this.CACHE_TTL_MS) return;
+    const plans = await this.planRepo.find({ select: ['slug', 'feature_flags'] });
+    this.cache = new Map(plans.map((p) => [p.slug, p.feature_flags ?? []]));
+    this.cacheLoadedAt = Date.now();
+  }
+
+  invalidateCache(): void {
+    this.cacheLoadedAt = 0;
+  }
+
+  /** Fail-closed: an unknown plan slug or a plan with no flags set grants nothing. */
+  async planHasFeature(planSlug: string, key: PlanFeatureKey): Promise<boolean> {
+    await this.ensureCache();
+    return (this.cache.get(planSlug) ?? []).includes(key);
+  }
+
+  async vendorHasFeature(vendorId: number, key: PlanFeatureKey): Promise<boolean> {
+    const vendor = await this.vendorRepo.findOne({ where: { id: vendorId }, select: ['subscription_plan'] });
+    return this.planHasFeature(vendor?.subscription_plan ?? 'free', key);
+  }
+}

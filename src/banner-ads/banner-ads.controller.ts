@@ -16,6 +16,7 @@ import { RazorpayService } from '../razorpay/razorpay.service';
 import { PushService } from '../services/push.service';
 import { MailService } from '../mail/mail.service';
 import { NotificationSettingsService } from '../notification-settings/notification-settings.service';
+import { PlanFeaturesService } from '../plan-features/plan-features.service';
 
 @ApiTags('banner-ads')
 @Controller('banner-ads')
@@ -29,6 +30,7 @@ export class BannerAdsController {
     private readonly push: PushService,
     private readonly mail: MailService,
     private readonly notificationSettings: NotificationSettingsService,
+    private readonly planFeatures: PlanFeaturesService,
   ) {}
 
   private async notifyVendorUser(vendorId: number): Promise<{ id: number; name: string; email: string | null } | null> {
@@ -108,6 +110,10 @@ export class BannerAdsController {
   async request(@CurrentUser() user: any, @Body() dto: RequestBannerAdDto) {
     const vendor = await this.vendorRepo.findOne({ where: { user_id: user.user_id }, select: ['id'] });
     if (!vendor) return { success: false, error: 'Vendor not found' };
+
+    if (user.role !== 'admin' && !(await this.planFeatures.vendorHasFeature(vendor.id, 'banner_ads'))) {
+      return { success: false, error: 'Banner ads aren\'t included in your current plan. Upgrade to unlock them.', code: 'PLAN_FEATURE_LOCKED' };
+    }
 
     const plan = await this.bannerPlanRepo.findOne({ where: { id: dto.banner_plan_id, is_active: true } });
     if (!plan) return { success: false, error: 'Selected banner plan not found or inactive' };

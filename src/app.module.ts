@@ -18,6 +18,7 @@ import { OffersModule } from './offers/offers.module';
 import { FeedModule } from './feed/feed.module';
 import { VendorModule } from './vendor/vendor.module';
 import { AdminModule } from './admin/admin.module';
+import { AdminAnalyticsModule } from './admin-analytics/admin-analytics.module';
 import { PaymentModule } from './payment/payment.module';
 import { RazorpayModule } from './razorpay/razorpay.module';
 import { NotificationsModule } from './notifications/notifications.module';
@@ -41,6 +42,7 @@ import { ReferralModule } from './referral/referral.module';
 import { InviteModule } from './invite/invite.module';
 import { GatewayModule } from './gateway/gateway.module';
 import { NotificationSettingsModule } from './notification-settings/notification-settings.module';
+import { PlanFeaturesModule } from './plan-features/plan-features.module';
 
 @Module({
   imports: [
@@ -52,12 +54,14 @@ import { NotificationSettingsModule } from './notification-settings/notification
     // MonitoringModule must be first so it's available globally
     MonitoringModule,
     NotificationSettingsModule,
+    PlanFeaturesModule,
 
     AuthModule,
     OffersModule,
     FeedModule,
     VendorModule,
     AdminModule,
+    AdminAnalyticsModule,
     PaymentModule,
     RazorpayModule,
     NotificationsModule,
