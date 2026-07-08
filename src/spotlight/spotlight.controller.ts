@@ -11,6 +11,9 @@ import { SpotlightRequest } from '../entities/spotlight-request.entity';
 import { Vendor } from '../entities/vendor.entity';
 import { User } from '../entities/user.entity';
 import { RequestSpotlightDto, ApproveSpotlightDto } from './dto/spotlight.dto';
+import { PushService } from '../services/push.service';
+import { MailService } from '../mail/mail.service';
+import { NotificationSettingsService } from '../notification-settings/notification-settings.service';
 
 @ApiTags('spotlight')
 @Controller('spotlight')
@@ -18,6 +21,10 @@ export class SpotlightController {
   constructor(
     @InjectRepository(SpotlightRequest) private readonly spotlightRepo: Repository<SpotlightRequest>,
     @InjectRepository(Vendor) private readonly vendorRepo: Repository<Vendor>,
+    @InjectRepository(User) private readonly userRepo: Repository<User>,
+    private readonly push: PushService,
+    private readonly mail: MailService,
+    private readonly notificationSettings: NotificationSettingsService,
   ) {}
 
   @Public()
@@ -111,6 +118,29 @@ export class SpotlightController {
       updateData.ends_at = ends;
     }
     await this.spotlightRepo.update(id, updateData);
+
+    const vendor = await this.vendorRepo.findOne({ where: { id: spotlight.vendor_id }, select: ['user_id', 'business_name'] });
+    const user = vendor ? await this.userRepo.findOne({ where: { id: vendor.user_id }, select: ['id', 'name', 'email'] }) : null;
+    if (user) {
+      if (dto.status === 'approved') {
+        await this.push.send(user.id, 'Spotlight Approved!', `Your spotlight request for ${vendor?.business_name ?? 'your business'} was approved.`, { type: 'spotlight_approved' });
+        if (user.email && await this.notificationSettings.isEnabled('spotlight_approved', 'email')) {
+          await this.mail.sendStatusEmail(
+            user.email, user.name, 'Your spotlight request was approved 🎉',
+            `Your spotlight request has been approved and will run for ${updateData.ends_at ? Math.round((updateData.ends_at.getTime() - Date.now()) / 86400000) : dto.duration_days ?? 7} days.`,
+          );
+        }
+      } else {
+        await this.push.send(user.id, 'Spotlight Update', 'Your spotlight request was not approved this time.', { type: 'spotlight_rejected' });
+        if (user.email && await this.notificationSettings.isEnabled('spotlight_rejected', 'email')) {
+          await this.mail.sendStatusEmail(
+            user.email, user.name, 'Update on your spotlight request',
+            'Your spotlight request was not approved this time. You\'re welcome to submit a new request anytime.',
+          );
+        }
+      }
+    }
+
     return { success: true, data: { updated: true } };
   }
 }

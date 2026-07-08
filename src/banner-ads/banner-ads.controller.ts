@@ -10,8 +10,12 @@ import { Public } from '../common/decorators/public.decorator';
 import { BannerAdRequest } from '../entities/banner-ad-request.entity';
 import { BannerPlan } from '../entities/banner-plan.entity';
 import { Vendor } from '../entities/vendor.entity';
+import { User } from '../entities/user.entity';
 import { RequestBannerAdDto, ReviewBannerAdDto } from './dto/banner-ads.dto';
 import { RazorpayService } from '../razorpay/razorpay.service';
+import { PushService } from '../services/push.service';
+import { MailService } from '../mail/mail.service';
+import { NotificationSettingsService } from '../notification-settings/notification-settings.service';
 
 @ApiTags('banner-ads')
 @Controller('banner-ads')
@@ -20,8 +24,19 @@ export class BannerAdsController {
     @InjectRepository(BannerAdRequest) private readonly bannerRepo: Repository<BannerAdRequest>,
     @InjectRepository(Vendor) private readonly vendorRepo: Repository<Vendor>,
     @InjectRepository(BannerPlan) private readonly bannerPlanRepo: Repository<BannerPlan>,
+    @InjectRepository(User) private readonly userRepo: Repository<User>,
     private readonly razorpayService: RazorpayService,
+    private readonly push: PushService,
+    private readonly mail: MailService,
+    private readonly notificationSettings: NotificationSettingsService,
   ) {}
+
+  private async notifyVendorUser(vendorId: number): Promise<{ id: number; name: string; email: string | null } | null> {
+    const vendor = await this.vendorRepo.findOne({ where: { id: vendorId }, select: ['user_id'] });
+    if (!vendor) return null;
+    const user = await this.userRepo.findOne({ where: { id: vendor.user_id }, select: ['id', 'name', 'email'] });
+    return user ?? null;
+  }
 
   @Public()
   @Get()
@@ -124,6 +139,29 @@ export class BannerAdsController {
     // expires_at is set only once the vendor pays (see confirmPayment).
     const updateData: Partial<BannerAdRequest> = { status: dto.status, review_note: dto.note ?? null };
     await this.bannerRepo.update(id, updateData);
+
+    const user = await this.notifyVendorUser(banner.vendor_id);
+    if (user) {
+      if (dto.status === 'approved') {
+        await this.push.send(user.id, 'Banner Ad Approved', `Your banner "${banner.title}" was approved — complete payment to make it live.`, { type: 'banner_approved' });
+        if (user.email && await this.notificationSettings.isEnabled('banner_approved', 'email')) {
+          await this.mail.sendStatusEmail(
+            user.email, user.name, 'Your banner ad was approved 🎉',
+            `Your banner "<strong>${banner.title}</strong>" has been approved. Complete payment to make it live.`,
+            'Complete Payment', `${process.env.APP_URL || 'https://adslife.in'}/vendor/banners`,
+          );
+        }
+      } else {
+        await this.push.send(user.id, 'Banner Ad Update', dto.note || `Your banner "${banner.title}" was not approved.`, { type: 'banner_rejected' });
+        if (user.email && await this.notificationSettings.isEnabled('banner_rejected', 'email')) {
+          await this.mail.sendStatusEmail(
+            user.email, user.name, 'Update on your banner ad request',
+            dto.note || `Your banner "<strong>${banner.title}</strong>" was not approved this time.`,
+          );
+        }
+      }
+    }
+
     return { success: true, data: { updated: true } };
   }
 
@@ -184,6 +222,18 @@ export class BannerAdsController {
       expires_at: expires,
       paid_at: now,
     });
+
+    const notifyUser = await this.notifyVendorUser(banner.vendor_id);
+    if (notifyUser) {
+      await this.push.send(notifyUser.id, 'Banner Ad Live!', `Your banner "${banner.title}" is now live on AdsLife.`, { type: 'banner_live' });
+      if (notifyUser.email && await this.notificationSettings.isEnabled('banner_live', 'email')) {
+        await this.mail.sendStatusEmail(
+          notifyUser.email, notifyUser.name, 'Your banner ad is now live 🚀',
+          `Your banner "<strong>${banner.title}</strong>" is now live and showing to AdsLife users until ${expires.toDateString()}.`,
+        );
+      }
+    }
+
     return { success: true, data: { status: 'live', expires_at: expires } };
   }
 

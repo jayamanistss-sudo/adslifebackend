@@ -35,6 +35,12 @@ const SEED: SeedRow[] = [
   { activity_type: 'plan_expired',          category: 'Vendor lifecycle',      label: 'Subscription plan expired',   email_enabled: false },
   { activity_type: 'vendor_digest',         category: 'Vendor lifecycle',      label: 'Weekly vendor performance digest', email_enabled: false },
   { activity_type: 'new_offer',             category: 'Social',                 label: 'New offer from followed vendor', email_enabled: true },
+  { activity_type: 'banner_approved',       category: 'Banner ads',            label: 'Banner ad approved',          email_enabled: true },
+  { activity_type: 'banner_rejected',       category: 'Banner ads',            label: 'Banner ad rejected',          email_enabled: true },
+  { activity_type: 'banner_live',           category: 'Banner ads',            label: 'Banner ad is live',           email_enabled: true },
+  { activity_type: 'spotlight_approved',    category: 'Spotlight',             label: 'Spotlight request approved',  email_enabled: true },
+  { activity_type: 'spotlight_rejected',    category: 'Spotlight',             label: 'Spotlight request rejected',  email_enabled: true },
+  { activity_type: 'support_reply',         category: 'Support',               label: 'Support ticket reply',        email_enabled: true },
 ];
 
 @Injectable()

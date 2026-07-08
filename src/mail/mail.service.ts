@@ -194,6 +194,36 @@ export class MailService {
     }
   }
 
+  /** Shared branded wrapper for simple one-off status updates (banner/spotlight/support)
+   *  that don't warrant a fully bespoke template like the lifecycle emails above. */
+  async sendStatusEmail(
+    toEmail: string, name: string, headline: string, message: string,
+    ctaLabel?: string, ctaUrl?: string,
+  ): Promise<void> {
+    const cta = ctaLabel && ctaUrl ? `
+          <a href="${ctaUrl}" style="display:block;text-align:center;background:#FF6200;color:#fff;padding:14px;border-radius:10px;text-decoration:none;font-size:16px;font-weight:600;margin:20px 0;">
+            ${ctaLabel}
+          </a>` : '';
+    const html = `
+      <div style="font-family:sans-serif;max-width:520px;margin:0 auto;padding:24px;background:#f9f9f9;">
+        <div style="background:#FF6200;padding:20px 24px;border-radius:12px 12px 0 0;text-align:center;">
+          <h1 style="color:#fff;margin:0;font-size:24px;">AdsLife</h1>
+          <p style="color:#ffe0cc;margin:4px 0 0;font-size:13px;">Discover · Earn · Win</p>
+        </div>
+        <div style="background:#fff;padding:24px;border-radius:0 0 12px 12px;border:1px solid #eee;">
+          <p style="font-size:16px;color:#333;">Hi <strong>${name}</strong>,</p>
+          <p style="color:#555;font-size:14px;line-height:1.6;">${message}</p>
+          ${cta}
+        </div>
+      </div>`;
+
+    try {
+      await this.send(toEmail, headline, html);
+    } catch (err: any) {
+      this.logger.warn(`Status email "${headline}" failed for ${toEmail}: ${err.message}`);
+    }
+  }
+
   async sendVendorRejectedEmail(toEmail: string, name: string, businessName: string, note?: string): Promise<void> {
     const appUrl = process.env.APP_URL || 'https://adslife.in';
     const html = `
