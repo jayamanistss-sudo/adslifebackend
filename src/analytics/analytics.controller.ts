@@ -66,4 +66,19 @@ export class AnalyticsController {
     const data = await this.analyticsService.benchmark(vendorId);
     return { success: true, data };
   }
+
+  @Get('audience/interactions')
+  async audienceInteractions(
+    @CurrentUser() user: any,
+    @Query('action') action: string,
+    @Query('vendor_id') vendorId?: number,
+    @Query('page') page?: string,
+  ) {
+    const resolvedVendorId = await this.resolveVendorId(user, vendorId);
+    if (!['view', 'click', 'save', 'redeem'].includes(action)) {
+      throw new BadRequestException('Invalid action type');
+    }
+    const data = await this.analyticsService.audienceInteractions(resolvedVendorId, action, page ? +page : 1);
+    return { success: true, data };
+  }
 }

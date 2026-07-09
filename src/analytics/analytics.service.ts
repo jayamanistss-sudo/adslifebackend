@@ -75,6 +75,7 @@ export class AnalyticsService {
           "COALESCE(SUM(CASE WHEN ui.action='view'  THEN 1 ELSE 0 END),0) AS total_impressions",
           "COALESCE(SUM(CASE WHEN ui.action='click' THEN 1 ELSE 0 END),0) AS total_clicks",
           "COALESCE(SUM(CASE WHEN ui.action='save'  THEN 1 ELSE 0 END),0) AS total_saves",
+          "COALESCE(SUM(CASE WHEN ui.action='redeem' THEN 1 ELSE 0 END),0) AS total_redemptions",
         ])
         .where('o.vendor_id = :vid', { vid: vendorId })
         .getRawOne(),
@@ -102,6 +103,7 @@ export class AnalyticsService {
     const imp = +summary?.total_impressions || 0;
     const clk = +summary?.total_clicks || 0;
     const sv  = +summary?.total_saves || 0;
+    const rdm = +summary?.total_redemptions || 0;
     const engagementRate = imp > 0 ? Math.round(((clk + sv) / imp) * 10000) / 100 : 0;
 
     const peakHours: number[] = new Array<number>(24).fill(0);
@@ -115,7 +117,34 @@ export class AnalyticsService {
       total_impressions: imp,
       total_clicks: clk,
       total_saves: sv,
+      total_redemptions: rdm,
     };
+  }
+
+  /**
+   * Paginated raw interaction rows for one action type — backs the
+   * click-to-drill-down views on the audience KPI tiles (web + mobile).
+   */
+  async audienceInteractions(vendorId: number, action: string, page = 1, limit = 20) {
+    const offset = (page - 1) * limit;
+    const qb = this.interactionRepo
+      .createQueryBuilder('ui')
+      .innerJoin(Offer, 'o', 'o.id = ui.offer_id')
+      .innerJoin('users', 'u', 'u.id = ui.user_id')
+      .select([
+        'ui.id AS id', 'ui.created_at AS created_at',
+        'o.id AS offer_id', 'o.title AS offer_title',
+        'u.name AS user_name',
+      ])
+      .where('o.vendor_id = :vid AND ui.action = :action', { vid: vendorId, action })
+      .orderBy('ui.created_at', 'DESC');
+
+    const [rows, total] = await Promise.all([
+      qb.clone().offset(offset).limit(limit).getRawMany(),
+      qb.getCount(),
+    ]);
+
+    return { rows, total, page, limit };
   }
 
   async heatmap(vendorId: number, days = 30) {
