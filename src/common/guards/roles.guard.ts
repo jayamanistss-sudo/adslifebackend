@@ -22,7 +22,14 @@ export class RolesGuard implements CanActivate {
     if (!requiredRoles || requiredRoles.length === 0) return true;
 
     const { user } = context.switchToHttp().getRequest();
-    if (!user || !requiredRoles.includes(user.role)) {
+    // requiredRoles may name a base role ('admin') or an admin sub-role
+    // ('super') — @Roles('super') passes only for admins whose admin_role
+    // is 'super', since a plain admin's user.role is 'admin', not 'super'.
+    const matches = !!user && (
+      requiredRoles.includes(user.role) ||
+      (!!user.admin_role && requiredRoles.includes(user.admin_role))
+    );
+    if (!matches) {
       throw new ForbiddenException('Insufficient permissions');
     }
     return true;

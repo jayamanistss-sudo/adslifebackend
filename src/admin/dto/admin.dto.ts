@@ -172,6 +172,17 @@ export class AdminUserActionDto {
   role?: string;
 }
 
+export class UpdateAdminRoleDto {
+  @ApiProperty({
+    enum: ['support', 'moderator', 'super', ''],
+    example: 'moderator',
+    description: 'Admin sub-role to grant. Empty string revokes admin sub-role (demotes to a plain admin with no elevated scope).',
+  })
+  @IsString()
+  @IsIn(['support', 'moderator', 'super', ''])
+  admin_role: string;
+}
+
 export class AdminOfferActionDto {
   @ApiProperty({
     enum: ['activate', 'deactivate', 'delete', 'feature'],

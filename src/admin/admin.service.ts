@@ -15,6 +15,8 @@ import { VendorApplication } from '../entities/vendor-application.entity';
 import { SubscriptionPlan } from '../entities/subscription-plan.entity';
 import { FraudFlag, FraudFlagStatus } from '../entities/fraud-flag.entity';
 import { Payment } from '../entities/payment.entity';
+import { AuthLog } from '../entities/auth-log.entity';
+import { Referral } from '../entities/referral.entity';
 import { clampLimit } from '../common/utils/pagination';
 import { NotificationSettingsService } from '../notification-settings/notification-settings.service';
 
@@ -32,6 +34,8 @@ export class AdminService {
     @InjectRepository(SubscriptionPlan) private readonly planRepo: Repository<SubscriptionPlan>,
     @InjectRepository(FraudFlag) private readonly fraudFlagRepo: Repository<FraudFlag>,
     @InjectRepository(Payment) private readonly paymentRepo: Repository<Payment>,
+    @InjectRepository(AuthLog) private readonly authLogRepo: Repository<AuthLog>,
+    @InjectRepository(Referral) private readonly referralRepo: Repository<Referral>,
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly push: PushService,
     private readonly mail: MailService,
@@ -115,6 +119,7 @@ export class AdminService {
     const users = await qb
       .select([
         'u.id AS id', 'u.name AS name', 'u.email AS email', 'u.role AS role',
+        'u.admin_role AS admin_role',
         'u.city AS city', 'u.is_active AS is_active', 'u.created_at AS created_at',
         'COALESCE((SELECT COUNT(*) FROM user_interactions WHERE user_id=u.id),0) AS interactions',
         '0 AS login_count', '0 AS follows',
@@ -288,9 +293,18 @@ export class AdminService {
     return settings;
   }
 
-  async updateSiteSettings(dto: Record<string, any>) {
+  async updateSiteSettings(dto: Record<string, any>, adminId?: number) {
     const entries = Object.entries(dto).map(([key, value]) => ({ key, value: String(value) }));
     await this.siteSettingRepo.upsert(entries, ['key']);
+    if (adminId) {
+      setImmediate(() => this.monitoring.logActivity({
+        userId: adminId, role: 'admin', action: 'admin_site_settings_update',
+        entityType: 'site_settings', entityId: 0,
+        description: `Admin updated site settings: ${Object.keys(dto).join(', ')}`,
+        // Redact values — this endpoint also carries payment API keys.
+        metadata: { keys: Object.keys(dto) },
+      }).catch(() => {}));
+    }
     return { updated: true };
   }
 
@@ -327,7 +341,73 @@ export class AdminService {
     return { updated: true };
   }
 
-  async updateOffer(offerId: number, action: string, extra: Record<string, any> = {}) {
+  // Gated `super`-only at the controller. Granting/revoking is itself logged,
+  // and every existing super-admin is emailed so a rogue grant can't go
+  // unnoticed (the core gap USR-01 in the audit — un-auditable self-promotion).
+  async updateAdminRole(userId: number, adminRole: string, grantedBy: number) {
+    const target = await this.userRepo.findOne({ where: { id: userId }, select: ['id', 'role', 'email', 'admin_role'] });
+    if (!target) throw new NotFoundException('User not found');
+    if (target.role !== UserRole.ADMIN) {
+      throw new BadRequestException('Admin sub-role can only be set on accounts with role=admin');
+    }
+    const newRole = adminRole === '' ? null : adminRole;
+    await this.userRepo.update(userId, { admin_role: newRole });
+
+    setImmediate(() => this.monitoring.logActivity({
+      userId: grantedBy, role: 'admin', action: 'admin_role_change',
+      entityType: 'user', entityId: userId,
+      description: `Admin sub-role for #${userId} changed: "${target.admin_role ?? ''}" -> "${newRole ?? ''}"`,
+      metadata: { old_admin_role: target.admin_role, new_admin_role: newRole },
+    }).catch(() => {}));
+
+    if (newRole === 'super') {
+      const supers = await this.userRepo.find({ where: { role: UserRole.ADMIN, admin_role: 'super' }, select: ['email'] });
+      const notifyList = supers.map(s => s.email).filter(e => e && e !== target.email);
+      if (notifyList.length) {
+        this.mail.send(
+          notifyList.join(','),
+          'AdsLife admin alert: a new super-admin was granted',
+          `<p>${target.email} was just granted the <strong>super</strong> admin sub-role by admin #${grantedBy}.</p>`,
+        ).catch(() => {});
+      }
+    }
+    return { updated: true, admin_role: newRole };
+  }
+
+  // token_invalidated_at is already enforced on every request (jwt.strategy.ts)
+  // — this just sets it on demand instead of only on the user's own
+  // logout/password-change, so support can end a session without a full ban.
+  async forceLogout(userId: number, adminId: number) {
+    await this.userRepo.update(userId, { token_invalidated_at: Date.now() as any });
+    setImmediate(() => this.monitoring.logActivity({
+      userId: adminId, role: 'admin', action: 'admin_force_logout',
+      entityType: 'user', entityId: userId,
+      description: `Admin forced logout on all devices for user #${userId}`,
+    }).catch(() => {}));
+    return { updated: true };
+  }
+
+  // Mirrors getVendorDetail's shape — aggregates what today requires
+  // cross-referencing several separate admin list screens by hand.
+  async getUserDetail(userId: number) {
+    const user = await this.userRepo.findOne({ where: { id: userId } });
+    if (!user) throw new NotFoundException('User not found');
+
+    const [savedCount, referralCount, loginHistory] = await Promise.all([
+      this.interactionRepo.count({ where: { user_id: userId, action: 'save' as any } }),
+      this.referralRepo.count({ where: { referrer_id: userId } }),
+      this.authLogRepo.find({
+        where: { user_id: userId },
+        order: { created_at: 'DESC' },
+        take: 25,
+      }),
+    ]);
+
+    const { password_hash, ...safeUser } = user as any;
+    return { user: safeUser, saved_count: savedCount, referral_count: referralCount, login_history: loginHistory };
+  }
+
+  async updateOffer(offerId: number, action: string, extra: Record<string, any> = {}, adminId?: number) {
     switch (action) {
       case 'activate':   await this.offerRepo.update(offerId, { is_active: true }); break;
       case 'deactivate': await this.offerRepo.update(offerId, { is_active: false }); break;
@@ -336,6 +416,14 @@ export class AdminService {
         await this.offerRepo.update(offerId, { is_featured: Boolean(extra.featured ?? 1) });
         break;
       default: throw new BadRequestException('Unknown action');
+    }
+    if (adminId) {
+      setImmediate(() => this.monitoring.logActivity({
+        userId: adminId, role: 'admin', action: `admin_offer_${action}`,
+        entityType: 'offer', entityId: offerId,
+        description: `Admin ${action} on offer #${offerId}`,
+        metadata: extra,
+      }).catch(() => {}));
     }
     return { updated: true };
   }

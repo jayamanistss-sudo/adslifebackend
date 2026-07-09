@@ -79,4 +79,10 @@ export class User {
 
   @Column({ type: 'boolean', default: true })
   email_alerts: boolean;
+
+  // Sub-tier within role='admin' only (support | moderator | super). Null for
+  // non-admins. Checked live from the DB on every request (see jwt.strategy.ts)
+  // rather than baked into the JWT, so a demotion takes effect immediately.
+  @Column({ type: 'varchar', length: 30, nullable: true })
+  admin_role: string | null;
 }

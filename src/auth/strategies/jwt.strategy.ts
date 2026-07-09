@@ -29,7 +29,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
 
     const user = await this.userRepo.findOne({
       where: { id: payload.user_id },
-      select: ['id', 'is_active', 'token_invalidated_at'],
+      select: ['id', 'is_active', 'token_invalidated_at', 'admin_role'],
     });
 
     if (!user?.is_active) {
@@ -45,6 +45,9 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       user_id: payload.user_id,
       sub:     payload.sub,
       role:    payload.role,
+      // Fetched fresh above (not stored in the JWT) so revoking/granting a
+      // super-admin sub-role takes effect on the very next request.
+      admin_role: user.admin_role,
       iat:     payload.iat,
       exp:     payload.exp,
     };

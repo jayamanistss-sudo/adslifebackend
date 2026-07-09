@@ -28,6 +28,7 @@ import { PasswordReset } from '../entities/password-reset.entity';
 import { UserLocation } from '../entities/user-location.entity';
 import { EmailChangeRequest } from '../entities/email-change-request.entity';
 import { SubscriptionPlan } from '../entities/subscription-plan.entity';
+import { PASSWORD_MIN_LENGTH, PASSWORD_POLICY_MESSAGE } from '../common/constants/password-policy';
 
 @Injectable()
 export class AuthService {
@@ -256,8 +257,8 @@ export class AuthService {
   }
 
   async resetPassword(token: string, newPassword: string) {
-    if (!token || !newPassword || newPassword.length < 6) {
-      throw new BadRequestException('Token and new password (min 6 chars) are required');
+    if (!token || !newPassword || newPassword.length < PASSWORD_MIN_LENGTH) {
+      throw new BadRequestException(`Token and new password are required. ${PASSWORD_POLICY_MESSAGE}`);
     }
     const reset = await this.passwordResetRepo.findOne({
       where: { token, used_at: IsNull() as any, expires_at: MoreThan(new Date()) },
@@ -278,7 +279,7 @@ export class AuthService {
   async getMe(userId: number) {
     const user = await this.userRepo.findOne({
       where: { id: userId },
-      select: ['id', 'name', 'email', 'phone', 'city', 'avatar_url', 'role', 'email_alerts'],
+      select: ['id', 'name', 'email', 'phone', 'city', 'avatar_url', 'role', 'admin_role', 'email_alerts'],
     });
     if (!user) throw new NotFoundException('User not found');
     return user;
@@ -346,8 +347,8 @@ export class AuthService {
   }
 
   async changePassword(userId: number, currentPassword: string, newPassword: string) {
-    if (!newPassword || newPassword.length < 6) {
-      throw new BadRequestException('New password must be at least 6 characters');
+    if (!newPassword || newPassword.length < PASSWORD_MIN_LENGTH) {
+      throw new BadRequestException(PASSWORD_POLICY_MESSAGE);
     }
     const user = await this.userRepo.findOne({
       where: { id: userId },

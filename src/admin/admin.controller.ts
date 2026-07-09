@@ -15,7 +15,7 @@ import {
   AdminListQueryDto, AdminVendorQueryDto, AdminOffersQueryDto,
   ReviewVendorDto, BroadcastDto, SiteSettingsDto,
   AdminVendorActionDto, AdminUserActionDto, AdminOfferActionDto,
-  BulkVendorPlanDto,
+  BulkVendorPlanDto, UpdateAdminRoleDto,
 } from './dto/admin.dto';
 
 @ApiTags('admin')
@@ -128,14 +128,20 @@ export class AdminController {
   }
 
   @Put('site-settings')
-  async updateSiteSettings(@Body() dto: SiteSettingsDto) {
-    const data = await this.adminService.updateSiteSettings(dto);
+  async updateSiteSettings(@CurrentUser() admin: any, @Body() dto: SiteSettingsDto) {
+    const data = await this.adminService.updateSiteSettings(dto, admin.user_id);
     return { success: true, data };
   }
 
   @Get('vendor-requests')
   async vendorRequests() {
     const data = await this.adminService.getVendorRequests();
+    return { success: true, data };
+  }
+
+  @Get('users/:id')
+  async userDetail(@Param('id', ParseIntPipe) id: number) {
+    const data = await this.adminService.getUserDetail(id);
     return { success: true, data };
   }
 
@@ -150,13 +156,35 @@ export class AdminController {
     return { success: true, data, message: 'User updated' };
   }
 
+  // Elevation/demotion of the admin sub-role itself is the one action in the
+  // whole panel gated tighter than the class-level @Roles('admin') — only an
+  // existing super-admin can grant or revoke it.
+  @Put('users/:id/admin-role')
+  @Roles('super')
+  @ApiBody({ type: UpdateAdminRoleDto })
+  async setAdminRole(
+    @CurrentUser() admin: any,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateAdminRoleDto,
+  ) {
+    const data = await this.adminService.updateAdminRole(id, dto.admin_role, admin.user_id);
+    return { success: true, data, message: 'Admin sub-role updated' };
+  }
+
+  @Put('users/:id/force-logout')
+  async forceLogout(@CurrentUser() admin: any, @Param('id', ParseIntPipe) id: number) {
+    const data = await this.adminService.forceLogout(id, admin.user_id);
+    return { success: true, data, message: 'User signed out on all devices' };
+  }
+
   @Put('offers/:id')
   @ApiBody({ type: AdminOfferActionDto })
   async offerAction(
+    @CurrentUser() admin: any,
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: AdminOfferActionDto,
   ) {
-    const data = await this.adminService.updateOffer(id, dto.action, dto);
+    const data = await this.adminService.updateOffer(id, dto.action, dto, admin.user_id);
     return { success: true, data, message: 'Offer updated' };
   }
 
