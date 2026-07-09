@@ -2,9 +2,15 @@ import { IsString, IsIn, IsOptional, MaxLength } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class FraudReviewDto {
-  @ApiProperty({ enum: ['resolved', 'false_positive', 'actioned'] })
+  // These previously didn't match FraudFlagStatus ('pending'|'reviewed'|
+  // 'dismissed') at all — every review call was failing the DB write with
+  // an invalid-enum-value error, silently surfaced to the admin as a
+  // generic 500. The downstream action (this session's fix) still applied
+  // before this write, so the flag itself just never actually got marked
+  // reviewed.
+  @ApiProperty({ enum: ['reviewed', 'dismissed'] })
   @IsString()
-  @IsIn(['resolved', 'false_positive', 'actioned'])
+  @IsIn(['reviewed', 'dismissed'])
   status: string;
 
   @ApiPropertyOptional()

@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Param, ParseIntPipe, UseGuards, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Query, ParseIntPipe, UseGuards, BadRequestException, NotFoundException } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
@@ -41,18 +41,21 @@ export class FraudController {
   }
 
   @Get('flagged')
-  async flagged() {
-    const data = await this.fraudFlagRepo
+  async flagged(@Query('status') status = '', @Query('type') type = '') {
+    // The status/type filter dropdowns in the admin UI were never actually
+    // wired to this endpoint — it always hardcoded pending-only, regardless
+    // of what was selected.
+    const qb = this.fraudFlagRepo
       .createQueryBuilder('ff')
       .leftJoin(Vendor, 'v', "ff.entity_type = 'vendor' AND ff.entity_id = v.id")
       .leftJoin(Offer, 'o', "ff.entity_type = 'offer' AND ff.entity_id = o.id")
       .select([
         'ff',
         'CASE WHEN ff.entity_type=\'vendor\' THEN v.business_name WHEN ff.entity_type=\'offer\' THEN o.title END as entity_name',
-      ])
-      .where("ff.status = 'pending'")
-      .orderBy('ff.confidence_score', 'DESC')
-      .getRawMany();
+      ]);
+    if (status) qb.andWhere('ff.status = :status', { status });
+    if (type) qb.andWhere('ff.entity_type = :type', { type });
+    const data = await qb.orderBy('ff.confidence_score', 'DESC').getRawMany();
     return { success: true, data };
   }
 
