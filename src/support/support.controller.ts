@@ -19,6 +19,7 @@ export class SupportController {
       dto.subject,
       dto.message,
       dto.category ?? 'general',
+      dto.priority,
     );
     return { success: true, data, message: 'Ticket created' };
   }
@@ -35,7 +36,7 @@ export class SupportController {
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: ReplyTicketDto,
   ) {
-    const data = await this.supportService.reply(id, user.user_id, dto.message, user.role);
+    const data = await this.supportService.reply(id, user.user_id, dto.message, user.role, dto.status, dto.priority);
     return { success: true, data };
   }
 }

@@ -3,12 +3,20 @@ import {
   PrimaryGeneratedColumn,
   Column,
   CreateDateColumn,
+  UpdateDateColumn,
 } from 'typeorm';
 
 export enum TicketStatus {
   OPEN = 'open',
   ANSWERED = 'answered',
   CLOSED = 'closed',
+}
+
+export enum TicketPriority {
+  LOW = 'low',
+  MEDIUM = 'medium',
+  HIGH = 'high',
+  URGENT = 'urgent',
 }
 
 @Entity('support_tickets')
@@ -31,6 +39,12 @@ export class SupportTicket {
   @Column({ type: 'enum', enum: TicketStatus, nullable: true, default: TicketStatus.OPEN })
   status: TicketStatus | null;
 
+  @Column({ type: 'enum', enum: TicketPriority, nullable: true, default: TicketPriority.MEDIUM })
+  priority: TicketPriority | null;
+
   @CreateDateColumn()
   created_at: Date;
+
+  @UpdateDateColumn()
+  updated_at: Date;
 }

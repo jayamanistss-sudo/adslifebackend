@@ -23,6 +23,14 @@ export class CreateTicketDto {
   @IsString()
   @IsIn(['general', 'billing', 'technical', 'account', 'offer', 'other'])
   category?: string = 'general';
+
+  // The vendor-facing create form already collects this but previously
+  // discarded it client-side ("priority is display-only, not stored").
+  @ApiPropertyOptional({ enum: ['low', 'medium', 'high', 'urgent'], default: 'medium' })
+  @IsOptional()
+  @IsString()
+  @IsIn(['low', 'medium', 'high', 'urgent'])
+  priority?: string;
 }
 
 export class ReplyTicketDto {
@@ -31,4 +39,19 @@ export class ReplyTicketDto {
   @IsNotEmpty()
   @MaxLength(2000)
   message: string;
+
+  // Neither field previously existed on this DTO — the global ValidationPipe
+  // whitelist silently stripped them even when the admin UI posted them, so
+  // an admin's chosen status/priority never actually persisted.
+  @ApiPropertyOptional({ enum: ['open', 'answered', 'closed'] })
+  @IsOptional()
+  @IsString()
+  @IsIn(['open', 'answered', 'closed'])
+  status?: string;
+
+  @ApiPropertyOptional({ enum: ['low', 'medium', 'high', 'urgent'] })
+  @IsOptional()
+  @IsString()
+  @IsIn(['low', 'medium', 'high', 'urgent'])
+  priority?: string;
 }

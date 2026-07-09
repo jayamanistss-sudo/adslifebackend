@@ -122,7 +122,9 @@ export class AdminService {
         'u.admin_role AS admin_role',
         'u.city AS city', 'u.is_active AS is_active', 'u.created_at AS created_at',
         'COALESCE((SELECT COUNT(*) FROM user_interactions WHERE user_id=u.id),0) AS interactions',
-        '0 AS login_count', '0 AS follows',
+        // Was hardcoded to a literal 0 — the real, actively-incremented
+        // column already existed and just wasn't selected.
+        'u.login_count AS login_count', '0 AS follows',
       ])
       .orderBy('u.created_at', 'DESC')
       .limit(limit)
@@ -309,10 +311,23 @@ export class AdminService {
   }
 
   async getVendorRequests() {
+    // plan_id was previously dropped on submit and never joined here, so the
+    // payment-status badge in VendorRequests.tsx rendered blank/stale on
+    // every application (fixed: vendor-apply.controller.ts now persists it).
     return this.appRepo
       .createQueryBuilder('va')
       .innerJoin(User, 'u', 'u.id = va.user_id')
-      .select(['va.*', 'u.name AS user_name', 'u.email AS user_email'])
+      .leftJoin(SubscriptionPlan, 'sp', 'sp.id = va.plan_id')
+      .select([
+        'va.*', 'u.name AS user_name', 'u.email AS user_email',
+        'sp.name AS plan_name', 'sp.price AS plan_price',
+        `(SELECT p.status FROM payments p
+            WHERE p.user_id = va.user_id AND p.reference_type = 'vendor_plan' AND p.reference_id = va.plan_id
+            ORDER BY p.created_at DESC LIMIT 1) AS payment_status`,
+        `(SELECT p.paid_at FROM payments p
+            WHERE p.user_id = va.user_id AND p.reference_type = 'vendor_plan' AND p.reference_id = va.plan_id
+            ORDER BY p.created_at DESC LIMIT 1) AS paid_at`,
+      ])
       .orderBy('va.created_at', 'DESC')
       .getRawMany();
   }

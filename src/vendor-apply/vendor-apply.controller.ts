@@ -61,6 +61,7 @@ export class VendorApplyController {
       lat: dto.lat ?? null,
       lng: dto.lng ?? null,
       logo_url: dto.logo_url ?? null,
+      plan_id: dto.plan_id ?? null,
       status: 'pending',
     });
 
