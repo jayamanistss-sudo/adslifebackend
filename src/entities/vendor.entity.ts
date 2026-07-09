@@ -11,6 +11,11 @@ export enum VendorStatus {
   APPROVED = 'approved',
   REJECTED = 'rejected',
   SUSPENDED = 'suspended',
+  // Set automatically when the fraud scorer's auto-reject threshold fires on
+  // approval — previously that score just sat in fraud_flags unused and the
+  // vendor went live regardless. All feed queries already gate on
+  // status='approved', so this alone hides the vendor with no other changes.
+  FRAUD_REVIEW = 'fraud_review',
 }
 
 @Entity('vendors')

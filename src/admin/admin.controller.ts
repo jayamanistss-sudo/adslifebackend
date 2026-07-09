@@ -1,11 +1,13 @@
 import {
-  Controller, Get, Post, Put, Body, Param, Query,
+  Controller, Get, Post, Put, Delete, Body, Param, Query,
   ParseIntPipe, UseGuards,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiBody } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { AdminService } from './admin.service';
 import { NotificationSettingsService } from '../notification-settings/notification-settings.service';
+import { OfferReviewsService } from '../offers/offer-reviews.service';
+import { MonitoringService } from '../monitoring/monitoring.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -27,6 +29,8 @@ export class AdminController {
   constructor(
     private readonly adminService: AdminService,
     private readonly notificationSettings: NotificationSettingsService,
+    private readonly offerReviews: OfferReviewsService,
+    private readonly monitoring: MonitoringService,
   ) {}
 
   @Get('notification-settings')
@@ -211,5 +215,33 @@ export class AdminController {
   async syncDailyStats(@Body('date') date?: string) {
     const data = await this.adminService.syncDailyStats(date);
     return { success: true, data };
+  }
+
+  // No delete/hide path existed for reviews at all before this — the only
+  // mutation paths were the reviewer themselves and the vendor's own reply.
+  @Get('reviews')
+  async reviews(@Query('page') page = '1', @Query('limit') limit = '30') {
+    const data = await this.offerReviews.adminList(Number(page) || 1, Number(limit) || 30);
+    return { success: true, data };
+  }
+
+  @Put('reviews/:id/hide')
+  async hideReview(@CurrentUser() admin: any, @Param('id', ParseIntPipe) id: number) {
+    const data = await this.offerReviews.setHidden(id, true);
+    setImmediate(() => this.monitoring.logActivity({
+      userId: admin.user_id, role: 'admin', action: 'admin_review_hide',
+      entityType: 'review', entityId: id, description: `Admin hid review #${id}`,
+    }).catch(() => {}));
+    return { success: true, data, message: 'Review hidden' };
+  }
+
+  @Put('reviews/:id/unhide')
+  async unhideReview(@CurrentUser() admin: any, @Param('id', ParseIntPipe) id: number) {
+    const data = await this.offerReviews.setHidden(id, false);
+    setImmediate(() => this.monitoring.logActivity({
+      userId: admin.user_id, role: 'admin', action: 'admin_review_unhide',
+      entityType: 'review', entityId: id, description: `Admin restored review #${id}`,
+    }).catch(() => {}));
+    return { success: true, data, message: 'Review restored' };
   }
 }

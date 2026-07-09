@@ -51,4 +51,30 @@ export class GroupDealsController {
     const data = await this.groupDealsService.status(dealId);
     return { success: true, data };
   }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @ApiBearerAuth()
+  @Roles('admin')
+  @Get('admin/list')
+  async adminList(
+    @Query('status') status = '',
+    @Query('page') page = '1',
+    @Query('limit') limit = '30',
+  ) {
+    const data = await this.groupDealsService.adminList(status, Number(page) || 1, Number(limit) || 30);
+    return { success: true, data };
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @ApiBearerAuth()
+  @Roles('admin')
+  @Post(':id/cancel')
+  async cancel(
+    @CurrentUser() admin: any,
+    @Param('id', ParseIntPipe) dealId: number,
+    @Body('note') note?: string,
+  ) {
+    const data = await this.groupDealsService.adminCancel(dealId, admin.user_id, note);
+    return { success: true, data, message: 'Group deal cancelled' };
+  }
 }

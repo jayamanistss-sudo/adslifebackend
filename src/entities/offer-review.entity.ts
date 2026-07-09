@@ -31,6 +31,12 @@ export class OfferReview {
   @Column({ type: 'timestamp', nullable: true })
   replied_at: Date | null;
 
+  // No moderation path existed at all — a defamatory/fake review had no
+  // remediation short of a direct database edit. Soft-hide preserves the
+  // record (for dispute history) while removing it from public view.
+  @Column({ type: 'boolean', default: false })
+  hidden_by_admin: boolean;
+
   @CreateDateColumn()
   created_at: Date;
 

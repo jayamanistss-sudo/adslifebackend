@@ -31,6 +31,7 @@ const SEED: SeedRow[] = [
   { activity_type: 'vendor_application_new', category: 'Vendor lifecycle',    label: 'New vendor application (to admins)', email_enabled: false },
   { activity_type: 'vendor_approved',       category: 'Vendor lifecycle',      label: 'Vendor application approved', email_enabled: true },
   { activity_type: 'vendor_rejected',       category: 'Vendor lifecycle',      label: 'Vendor application rejected', email_enabled: true },
+  { activity_type: 'vendor_suspended',      category: 'Vendor lifecycle',      label: 'Vendor account suspended',    email_enabled: true },
   { activity_type: 'plan_activated',        category: 'Vendor lifecycle',      label: 'Subscription plan activated', email_enabled: false },
   { activity_type: 'plan_expired',          category: 'Vendor lifecycle',      label: 'Subscription plan expired',   email_enabled: false },
   { activity_type: 'vendor_digest',         category: 'Vendor lifecycle',      label: 'Weekly vendor performance digest', email_enabled: false },

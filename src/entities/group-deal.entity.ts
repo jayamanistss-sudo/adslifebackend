@@ -9,6 +9,8 @@ export enum GroupDealStatus {
   ACTIVE = 'active',
   FULFILLED = 'fulfilled',
   EXPIRED = 'expired',
+  // No admin cancel action existed at all — the only mutation path was join().
+  CANCELLED = 'cancelled',
 }
 
 @Entity('group_deals')

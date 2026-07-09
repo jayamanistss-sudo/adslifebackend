@@ -1,12 +1,16 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { OfferReview } from '../entities/offer-review.entity';
+import { Offer } from '../entities/offer.entity';
+import { Vendor } from '../entities/vendor.entity';
 
 @Injectable()
 export class OfferReviewsService {
   constructor(
     @InjectRepository(OfferReview) private readonly reviewRepo: Repository<OfferReview>,
+    @InjectRepository(Offer) private readonly offerRepo: Repository<Offer>,
+    @InjectRepository(Vendor) private readonly vendorRepo: Repository<Vendor>,
   ) {}
 
   async list(offerId: number, page = 1, perPage = 10, userId?: number) {
@@ -24,12 +28,13 @@ export class OfferReviewsService {
         'r.replied_at AS "repliedAt"',
       ])
       .where('r.offer_id = :offerId', { offerId })
+      .andWhere('r.hidden_by_admin = false')
       .orderBy('r.created_at', 'DESC')
       .offset((page - 1) * perPage)
       .limit(perPage)
       .getRawMany();
 
-    const total = await this.reviewRepo.count({ where: { offer_id: offerId } });
+    const total = await this.reviewRepo.count({ where: { offer_id: offerId, hidden_by_admin: false } });
     const { avgRating, reviewCount } = await this.getAggregate(offerId);
     const myReview = userId ? await this.getMine(offerId, userId) : null;
 
@@ -45,6 +50,14 @@ export class OfferReviewsService {
   async upsert(offerId: number, userId: number, rating: number, comment?: string) {
     if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
       throw new BadRequestException('rating must be an integer between 1 and 5');
+    }
+
+    // Previously unguarded — a vendor could rate their own offer.
+    const offer = await this.offerRepo.findOne({ where: { id: offerId }, select: ['id', 'vendor_id'] });
+    if (!offer) throw new NotFoundException('Offer not found');
+    const vendor = await this.vendorRepo.findOne({ where: { id: offer.vendor_id }, select: ['user_id'] });
+    if (vendor?.user_id === userId) {
+      throw new ForbiddenException('You cannot review your own offer');
     }
 
     const existing = await this.reviewRepo.findOne({ where: { offer_id: offerId, user_id: userId } });
@@ -64,6 +77,7 @@ export class OfferReviewsService {
       .select('AVG(r.rating)', 'avg')
       .addSelect('COUNT(*)', 'count')
       .where('r.offer_id = :offerId', { offerId })
+      .andWhere('r.hidden_by_admin = false')
       .getRawOne<{ avg: string | null; count: string }>();
 
     return {
@@ -74,5 +88,29 @@ export class OfferReviewsService {
 
   async getMine(offerId: number, userId: number) {
     return this.reviewRepo.findOne({ where: { offer_id: offerId, user_id: userId } });
+  }
+
+  // Admin moderation — no such path existed at all before this.
+  async adminList(page = 1, perPage = 30) {
+    const [reviews, total] = await this.reviewRepo
+      .createQueryBuilder('r')
+      .innerJoin('users', 'u', 'u.id = r.user_id')
+      .innerJoin('offers', 'o', 'o.id = r.offer_id')
+      .select([
+        'r.*', 'u.name AS user_name', 'u.email AS user_email', 'o.title AS offer_title',
+      ])
+      .orderBy('r.created_at', 'DESC')
+      .offset((page - 1) * perPage)
+      .limit(perPage)
+      .getRawMany()
+      .then(async (rows) => [rows, await this.reviewRepo.count()] as const);
+    return { reviews, total };
+  }
+
+  async setHidden(reviewId: number, hidden: boolean) {
+    const review = await this.reviewRepo.findOne({ where: { id: reviewId } });
+    if (!review) throw new NotFoundException('Review not found');
+    await this.reviewRepo.update(reviewId, { hidden_by_admin: hidden });
+    return { updated: true };
   }
 }

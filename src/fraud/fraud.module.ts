@@ -10,5 +10,6 @@ import { Offer } from '../entities/offer.entity';
   imports: [TypeOrmModule.forFeature([FraudFlag, Vendor, Offer])],
   controllers: [FraudController],
   providers: [FraudDetectorService],
+  exports: [FraudDetectorService],
 })
 export class FraudModule {}

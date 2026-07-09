@@ -19,6 +19,7 @@ import { AuthLog } from '../entities/auth-log.entity';
 import { Referral } from '../entities/referral.entity';
 import { clampLimit } from '../common/utils/pagination';
 import { NotificationSettingsService } from '../notification-settings/notification-settings.service';
+import { FraudDetectorService } from '../services/fraud-detector.service';
 
 @Injectable()
 export class AdminService {
@@ -41,6 +42,7 @@ export class AdminService {
     private readonly mail: MailService,
     private readonly monitoring: MonitoringService,
     private readonly notificationSettings: NotificationSettingsService,
+    private readonly fraudDetector: FraudDetectorService,
   ) {}
 
   async getStats() {
@@ -208,12 +210,14 @@ export class AdminService {
     const app = await this.appRepo.findOne({ where: { id: appId } });
     if (!app) throw new NotFoundException('Application not found');
 
+    let vendorId: number | null = null;
     await this.dataSource.transaction(async (manager) => {
       await manager.getRepository(VendorApplication).update(appId, { status });
 
       if (status === 'approved') {
         const existing = await manager.getRepository(Vendor).findOne({ where: { user_id: app.user_id }, select: ['id'] });
         if (existing) {
+          vendorId = existing.id;
           await manager.getRepository(Vendor).update(
             { user_id: app.user_id },
             {
@@ -226,7 +230,7 @@ export class AdminService {
             },
           );
         } else {
-          await manager.getRepository(Vendor).save({
+          const saved = await manager.getRepository(Vendor).save({
             user_id: app.user_id, business_name: app.business_name, category: app.category,
             city: app.city, address: app.address, phone: app.phone, website: app.website,
             gst_number: app.gst_number, description: app.description,
@@ -234,14 +238,32 @@ export class AdminService {
             lat: app.lat ?? null, lng: app.lng ?? null,
             status: VendorStatus.APPROVED, review_note: note || null, subscription_plan: 'free',
           });
+          vendorId = saved.id;
         }
         await manager.getRepository(User).update(app.user_id, { role: UserRole.VENDOR });
       }
     });
 
+    // Previously the fraud scorer only ran when an admin manually requested
+    // a scan on this exact vendor ID — everything it could detect (duplicate
+    // name, no site/GST, bad phone pattern, missing location) went live the
+    // instant an admin clicked Approve. Now it runs automatically right here;
+    // a high-confidence result holds the vendor out of the feed (all feed
+    // queries already gate on status='approved') instead of leaving them live.
+    let heldForFraudReview = false;
+    if (status === 'approved' && vendorId) {
+      const fraudResult = await this.fraudDetector.checkVendor(vendorId).catch(() => null);
+      if (fraudResult?.action === 'auto_reject') {
+        await this.vendorRepo.update(vendorId, { status: VendorStatus.FRAUD_REVIEW });
+        heldForFraudReview = true;
+      }
+    }
+
     const user = await this.userRepo.findOne({ where: { id: app.user_id }, select: ['id', 'name', 'email'] });
 
-    if (status === 'approved') {
+    if (status === 'approved' && heldForFraudReview) {
+      await this.push.send(app.user_id, 'Vendor Application Under Review', 'Your application needs a bit more review before going live. We\'ll notify you shortly.', { type: 'vendor_approved' });
+    } else if (status === 'approved') {
       await this.push.send(app.user_id, 'Vendor Approved!', 'Your vendor account has been approved. Start adding offers now!', { type: 'vendor_approved' });
       if (user?.email && await this.notificationSettings.isEnabled('vendor_approved', 'email')) {
         await this.mail.sendVendorApprovedEmail(user.email, user.name, app.business_name);
@@ -253,7 +275,7 @@ export class AdminService {
       }
     }
 
-    return { updated: true };
+    return { updated: true, held_for_fraud_review: heldForFraudReview };
   }
 
   async getAdminOffers(search = '', category = '', status = '', limit = 30, offset = 0) {
@@ -444,30 +466,69 @@ export class AdminService {
   }
 
   async updateVendor(vendorId: number, action: string, extra: Record<string, any> = {}, adminId?: number) {
-    switch (action) {
-      case 'approve':  await this.vendorRepo.update(vendorId, { status: VendorStatus.APPROVED }); break;
-      case 'reject':   await this.vendorRepo.update(vendorId, { status: VendorStatus.REJECTED }); break;
-      case 'suspend':  await this.vendorRepo.update(vendorId, { status: VendorStatus.SUSPENDED }); break;
-      case 'update_plan': {
-        if (!extra.plan) throw new BadRequestException('Plan is required');
-        const dbPlan = extra.plan !== 'free'
-          ? await this.planRepo.findOne({ where: { slug: extra.plan }, select: ['slug'] })
-          : null;
-        if (!dbPlan && extra.plan !== 'free') throw new BadRequestException('Invalid plan');
-        await this.vendorRepo.update(vendorId, { subscription_plan: extra.plan });
-        break;
+    let cascadedOffers = 0;
+
+    if (action === 'suspend' || action === 'reject') {
+      const vendor = await this.vendorRepo.findOne({ where: { id: vendorId } });
+      if (!vendor) throw new NotFoundException('Vendor not found');
+
+      const newStatus = action === 'suspend' ? VendorStatus.SUSPENDED : VendorStatus.REJECTED;
+      await this.dataSource.transaction(async (manager) => {
+        // note was previously accepted by the DTO and silently discarded —
+        // now persisted the same way the initial application review already does.
+        await manager.getRepository(Vendor).update(vendorId, { status: newStatus, review_note: extra.note || null });
+        if (action === 'suspend') {
+          // A suspended vendor's offers previously stayed live indefinitely —
+          // no cascade existed at all. Reactivation on unsuspend is a
+          // deliberate manual step, not automatic (some offers may have been
+          // independently deactivated before the suspension for other reasons).
+          const result = await manager.getRepository(Offer).update(
+            { vendor_id: vendorId, is_active: true }, { is_active: false },
+          );
+          cascadedOffers = result.affected ?? 0;
+        }
+      });
+
+      // This later-stage suspend/reject path never notified the vendor at
+      // all — they'd only discover it when their offers stopped showing.
+      const user = await this.userRepo.findOne({ where: { id: vendor.user_id }, select: ['id', 'name', 'email'] });
+      const notifType = action === 'suspend' ? 'vendor_suspended' : 'vendor_rejected';
+      const title = action === 'suspend' ? 'Vendor Account Suspended' : 'Vendor Account Update';
+      const body = extra.note || (action === 'suspend'
+        ? 'Your vendor account has been suspended. Contact support for details.'
+        : 'Your vendor account status was updated.');
+      if (user) {
+        await this.push.send(user.id, title, body, { type: notifType });
+        if (user.email && await this.notificationSettings.isEnabled(notifType, 'email')) {
+          await this.mail.sendStatusEmail(user.email, user.name, title, body);
+        }
       }
-      default: throw new BadRequestException('Unknown vendor action');
+    } else {
+      switch (action) {
+        case 'approve': await this.vendorRepo.update(vendorId, { status: VendorStatus.APPROVED }); break;
+        case 'update_plan': {
+          if (!extra.plan) throw new BadRequestException('Plan is required');
+          const dbPlan = extra.plan !== 'free'
+            ? await this.planRepo.findOne({ where: { slug: extra.plan }, select: ['slug'] })
+            : null;
+          if (!dbPlan && extra.plan !== 'free') throw new BadRequestException('Invalid plan');
+          await this.vendorRepo.update(vendorId, { subscription_plan: extra.plan });
+          break;
+        }
+        default: throw new BadRequestException('Unknown vendor action');
+      }
     }
+
     if (adminId) {
       setImmediate(() => this.monitoring.logActivity({
         userId: adminId, role: 'admin', action: `admin_vendor_${action}`,
         entityType: 'vendor', entityId: vendorId,
-        description: `Admin ${action} on vendor #${vendorId}`,
+        description: `Admin ${action} on vendor #${vendorId}`
+          + (cascadedOffers ? ` — deactivated ${cascadedOffers} offer(s)` : ''),
         metadata: extra,
       }).catch(() => {}));
     }
-    return { updated: true };
+    return { updated: true, ...(action === 'suspend' ? { cascaded_offers: cascadedOffers } : {}) };
   }
 
   async bulkUpdateVendorPlan(vendorIds: number[], plan: string, adminId: number) {

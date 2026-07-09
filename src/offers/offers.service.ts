@@ -17,6 +17,7 @@ import { User } from '../entities/user.entity';
 import { SubscriptionPlan } from '../entities/subscription-plan.entity';
 import { UserInteraction, InteractionAction } from '../entities/user-interaction.entity';
 import { OfferReviewsService } from './offer-reviews.service';
+import { FraudDetectorService } from '../services/fraud-detector.service';
 
 @Injectable()
 export class OffersService {
@@ -31,6 +32,7 @@ export class OffersService {
     private readonly mail: MailService,
     private readonly notificationSettings: NotificationSettingsService,
     private readonly offerReviewsService: OfferReviewsService,
+    private readonly fraudDetector: FraudDetectorService,
   ) {}
 
   private async getVendorId(userId: number): Promise<number> {
@@ -79,6 +81,17 @@ export class OffersService {
       is_active: true,
     });
     const offerId = saved.id;
+
+    // Previously the scorer only ever ran when an admin manually triggered a
+    // scan on a specific offer ID — everything it could detect (suspicious
+    // discount, copied description) went live unchecked. Now it runs on
+    // every new offer, and a high-confidence result actually holds the offer
+    // instead of just recording a flag nobody looks at.
+    const fraudResult = await this.fraudDetector.checkOffer(offerId).catch(() => null);
+    if (fraudResult?.action === 'auto_reject') {
+      await this.offerRepo.update(offerId, { is_active: false });
+      return { id: offerId, held_for_review: true };
+    }
 
     this.notifySubscribers(vendorId, offerId, dto.title.trim(), dto.discount_percent).catch(() => {});
 

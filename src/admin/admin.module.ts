@@ -19,6 +19,8 @@ import { NotificationOutbox } from '../entities/notification-outbox.entity';
 import { AuthLog } from '../entities/auth-log.entity';
 import { Referral } from '../entities/referral.entity';
 import { MailModule } from '../mail/mail.module';
+import { FraudModule } from '../fraud/fraud.module';
+import { OffersModule } from '../offers/offers.module';
 
 @Module({
   imports: [
@@ -28,6 +30,8 @@ import { MailModule } from '../mail/mail.module';
       UserFcmToken, Notification, NotificationOutbox, AuthLog, Referral,
     ]),
     MailModule,
+    FraudModule,
+    OffersModule,
   ],
   controllers: [AdminController],
   providers: [AdminService, PushService],
