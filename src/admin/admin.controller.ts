@@ -17,7 +17,7 @@ import {
   AdminListQueryDto, AdminVendorQueryDto, AdminOffersQueryDto,
   ReviewVendorDto, BroadcastDto, SiteSettingsDto,
   AdminVendorActionDto, AdminUserActionDto, AdminOfferActionDto,
-  BulkVendorPlanDto, UpdateAdminRoleDto,
+  BulkVendorPlanDto, UpdateAdminRoleDto, AdminOfferEditDto,
 } from './dto/admin.dto';
 
 @ApiTags('admin')
@@ -98,7 +98,7 @@ export class AdminController {
     const limit  = Number(query.limit)  || 30;
     const offset = Number(query.offset) || 0;
     const data = await this.adminService.getAdminOffers(
-      query.search ?? '', query.category ?? '', query.status ?? '', limit, offset,
+      query.search ?? '', query.category ?? '', query.status ?? '', limit, offset, query.vendorStatus ?? '',
     );
     return { success: true, data };
   }
@@ -189,6 +189,19 @@ export class AdminController {
     @Body() dto: AdminOfferActionDto,
   ) {
     const data = await this.adminService.updateOffer(id, dto.action, dto, admin.user_id);
+    return { success: true, data, message: 'Offer updated' };
+  }
+
+  // Previously admin could only toggle status — not fix a vendor's typo'd
+  // title, wrong price, etc. without the vendor's own cooperation.
+  @Put('offers/:id/edit')
+  @ApiBody({ type: AdminOfferEditDto })
+  async offerEdit(
+    @CurrentUser() admin: any,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: AdminOfferEditDto,
+  ) {
+    const data = await this.adminService.updateOfferContent(id, dto, admin.user_id);
     return { success: true, data, message: 'Offer updated' };
   }
 

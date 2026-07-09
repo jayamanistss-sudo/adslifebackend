@@ -18,6 +18,7 @@ import { SubscriptionPlan } from '../entities/subscription-plan.entity';
 import { UserInteraction, InteractionAction } from '../entities/user-interaction.entity';
 import { OfferReviewsService } from './offer-reviews.service';
 import { FraudDetectorService } from '../services/fraud-detector.service';
+import { Category } from '../entities/category.entity';
 
 @Injectable()
 export class OffersService {
@@ -28,6 +29,7 @@ export class OffersService {
     @InjectRepository(User) private readonly userRepo: Repository<User>,
     @InjectRepository(SubscriptionPlan) private readonly planRepo: Repository<SubscriptionPlan>,
     @InjectRepository(UserInteraction) private readonly userInteractionRepo: Repository<UserInteraction>,
+    @InjectRepository(Category) private readonly categoryRepo: Repository<Category>,
     private readonly push: PushService,
     private readonly mail: MailService,
     private readonly notificationSettings: NotificationSettingsService,
@@ -54,6 +56,13 @@ export class OffersService {
     }
   }
 
+  // offers.category (free-text slug) has no FK — this resolves the matching
+  // categories.id alongside it so category_id stays in sync from creation.
+  private async resolveCategoryId(slug: string): Promise<number | null> {
+    const cat = await this.categoryRepo.findOne({ where: { slug }, select: ['id'] });
+    return cat?.id ?? null;
+  }
+
   async create(userId: number, dto: CreateOfferDto) {
     const vendorId = await this.getVendorId(userId);
     if (!dto.title?.trim()) throw new BadRequestException('Title is required');
@@ -61,12 +70,19 @@ export class OffersService {
 
     const validFrom = dto.valid_from ? new Date(dto.valid_from + 'T00:00:00') : null;
     const validUntil = dto.valid_until ? new Date(dto.valid_until + 'T23:59:59') : null;
+    // The date-order check existed client-side only — a direct API call
+    // could create an offer that expires before it starts.
+    if (validFrom && validUntil && validFrom >= validUntil) {
+      throw new BadRequestException('valid_until must be after valid_from');
+    }
+    const category = dto.category?.trim() || 'general';
 
     const saved = await this.offerRepo.save({
       vendor_id: vendorId,
       title: dto.title.trim(),
       description: dto.description?.trim() || null,
-      category: dto.category?.trim() || 'general',
+      category,
+      category_id: await this.resolveCategoryId(category),
       discount_percent: dto.discount_percent ?? null,
       original_price: dto.original_price ?? null,
       offer_price: dto.offer_price ?? null,
@@ -153,7 +169,10 @@ export class OffersService {
 
     if (dto.title?.trim())                           updateData.title = dto.title.trim();
     if (dto.description !== undefined)               updateData.description = trimOrNull(dto.description);
-    if (dto.category?.trim())                        updateData.category = dto.category.trim();
+    if (dto.category?.trim()) {
+      updateData.category = dto.category.trim();
+      updateData.category_id = await this.resolveCategoryId(updateData.category);
+    }
     if (dto.image_url !== undefined)                 updateData.image_url = trimOrNull(dto.image_url);
     if (dto.images !== undefined)                    (updateData as any).images = dto.images ?? null;
     if (dto.coupon_code !== undefined)               updateData.coupon_code = trimOrNull(dto.coupon_code);
@@ -166,6 +185,12 @@ export class OffersService {
     if (dto.is_active !== undefined)                 updateData.is_active = Boolean(dto.is_active);
     if (dto.valid_from)                              updateData.valid_from = new Date(dto.valid_from + 'T00:00:00');
     if (dto.valid_until)                             updateData.valid_until = new Date(dto.valid_until + 'T23:59:59');
+
+    const effectiveFrom = updateData.valid_from ?? offer.valid_from;
+    const effectiveUntil = updateData.valid_until ?? offer.valid_until;
+    if (effectiveFrom && effectiveUntil && effectiveFrom >= effectiveUntil) {
+      throw new BadRequestException('valid_until must be after valid_from');
+    }
 
     if (Object.keys(updateData).length === 0) throw new BadRequestException('No fields to update');
     await this.offerRepo.update(offerId, updateData);

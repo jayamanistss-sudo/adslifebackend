@@ -18,6 +18,7 @@ import { Notification } from '../entities/notification.entity';
 import { NotificationOutbox } from '../entities/notification-outbox.entity';
 import { AuthLog } from '../entities/auth-log.entity';
 import { Referral } from '../entities/referral.entity';
+import { Category } from '../entities/category.entity';
 import { MailModule } from '../mail/mail.module';
 import { FraudModule } from '../fraud/fraud.module';
 import { OffersModule } from '../offers/offers.module';
@@ -27,7 +28,7 @@ import { OffersModule } from '../offers/offers.module';
     TypeOrmModule.forFeature([
       User, Vendor, Offer, SiteSetting, VendorDailyStat, UserInteraction,
       VendorApplication, SubscriptionPlan, FraudFlag, Payment,
-      UserFcmToken, Notification, NotificationOutbox, AuthLog, Referral,
+      UserFcmToken, Notification, NotificationOutbox, AuthLog, Referral, Category,
     ]),
     MailModule,
     FraudModule,

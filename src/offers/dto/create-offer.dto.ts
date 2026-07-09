@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsNumber, IsInt, Min, IsArray } from 'class-validator';
+import { IsString, IsOptional, IsNumber, IsInt, Min, Max, IsArray, ArrayMaxSize } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class CreateOfferDto {
@@ -17,8 +17,11 @@ export class CreateOfferDto {
   @IsString()
   image_url?: string;
 
+  // Previously unbounded — a direct API call could attach unlimited images.
+  // The vendor form already caps this at 5 client-side only.
   @IsOptional()
   @IsArray()
+  @ArrayMaxSize(5)
   @IsString({ each: true })
   images?: string[];
 
@@ -30,9 +33,14 @@ export class CreateOfferDto {
   @IsString()
   redeem_url?: string;
 
+  // Previously unbounded — a direct API call could create a negative or
+  // 500% "discount"; a fraud rule flagged >80% as suspicious but never
+  // blocked it. This is a hard sanity ceiling, not the fraud threshold.
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
+  @Min(0)
+  @Max(100)
   discount_percent?: number;
 
   @IsOptional()

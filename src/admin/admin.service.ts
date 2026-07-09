@@ -17,6 +17,7 @@ import { FraudFlag, FraudFlagStatus } from '../entities/fraud-flag.entity';
 import { Payment } from '../entities/payment.entity';
 import { AuthLog } from '../entities/auth-log.entity';
 import { Referral } from '../entities/referral.entity';
+import { Category } from '../entities/category.entity';
 import { clampLimit } from '../common/utils/pagination';
 import { NotificationSettingsService } from '../notification-settings/notification-settings.service';
 import { FraudDetectorService } from '../services/fraud-detector.service';
@@ -37,6 +38,7 @@ export class AdminService {
     @InjectRepository(Payment) private readonly paymentRepo: Repository<Payment>,
     @InjectRepository(AuthLog) private readonly authLogRepo: Repository<AuthLog>,
     @InjectRepository(Referral) private readonly referralRepo: Repository<Referral>,
+    @InjectRepository(Category) private readonly categoryRepo: Repository<Category>,
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly push: PushService,
     private readonly mail: MailService,
@@ -278,7 +280,7 @@ export class AdminService {
     return { updated: true, held_for_fraud_review: heldForFraudReview };
   }
 
-  async getAdminOffers(search = '', category = '', status = '', limit = 30, offset = 0) {
+  async getAdminOffers(search = '', category = '', status = '', limit = 30, offset = 0, vendorStatus = '') {
     limit = clampLimit(limit, 30);
     offset = Math.max(Number(offset) || 0, 0);
     const qb = this.offerRepo
@@ -290,15 +292,44 @@ export class AdminService {
     else if (status === 'expired') qb.andWhere('o.valid_until < NOW()');
     if (category) qb.andWhere('o.category = :category', { category });
     if (search) qb.andWhere('(o.title LIKE :s OR v.business_name LIKE :s)', { s: `%${search}%` });
+    // Previously no way to ask "show every offer belonging to a suspended
+    // vendor" — compounded the vendor-suspend cascade gap this session
+    // already fixed at the write side.
+    if (vendorStatus) qb.andWhere('v.status = :vendorStatus', { vendorStatus });
 
     const total = await qb.getCount();
     const offers = await qb
-      .select(['o.*', 'v.business_name AS business_name', 'u.email AS vendor_email'])
+      .select(['o.*', 'v.business_name AS business_name', 'u.email AS vendor_email', 'v.status AS vendor_status'])
       .orderBy('o.created_at', 'DESC')
       .limit(limit)
       .offset(offset)
       .getRawMany();
     return { offers, total };
+  }
+
+  // Admin could previously only toggle status — no way to fix a vendor's
+  // typo'd title/price without their cooperation.
+  async updateOfferContent(offerId: number, dto: Record<string, any>, adminId?: number) {
+    const allowed = ['title', 'description', 'category', 'discount_percent', 'original_price', 'offer_price', 'valid_from', 'valid_until'] as const;
+    const updateData: Record<string, any> = {};
+    for (const key of allowed) {
+      if (dto[key] !== undefined) updateData[key] = dto[key];
+    }
+    if (dto.category) {
+      const cat = await this.categoryRepo.findOne({ where: { slug: dto.category } });
+      updateData.category_id = cat?.id ?? null;
+    }
+    if (!Object.keys(updateData).length) throw new BadRequestException('No fields to update');
+    await this.offerRepo.update(offerId, updateData);
+    if (adminId) {
+      setImmediate(() => this.monitoring.logActivity({
+        userId: adminId, role: 'admin', action: 'admin_offer_edit',
+        entityType: 'offer', entityId: offerId,
+        description: `Admin edited offer #${offerId} content`,
+        metadata: { fields: Object.keys(updateData) },
+      }).catch(() => {}));
+    }
+    return { updated: true };
   }
 
   async broadcast(title: string, body: string, data: Record<string, string> = {}, adminId?: number) {

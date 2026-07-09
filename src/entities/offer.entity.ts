@@ -23,6 +23,14 @@ export class Offer {
   @Column({ type: 'varchar', length: 100, nullable: true, default: 'general' })
   category: string | null;
 
+  // Real FK alongside the free-text slug above — deleting/renaming a
+  // category used to silently orphan every offer referencing it (no way to
+  // even find them). Both columns are kept in sync by create/update/rename/
+  // delete rather than dropping the string column outright, to avoid
+  // touching every existing query that still joins on the slug.
+  @Column({ type: 'int', nullable: true })
+  category_id: number | null;
+
   @Column({ type: 'text', nullable: true })
   image_url: string | null;
 

@@ -66,6 +66,10 @@ export class AdminOffersQueryDto {
   @IsOptional() @IsString()
   status?: string;
 
+  @ApiPropertyOptional({ enum: ['pending_review', 'approved', 'rejected', 'suspended', 'fraud_review', ''] })
+  @IsOptional() @IsString()
+  vendorStatus?: string;
+
   @ApiPropertyOptional()
   @IsOptional() @Type(() => Number) @IsInt() @Min(1)
   limit?: number;
@@ -73,6 +77,17 @@ export class AdminOffersQueryDto {
   @ApiPropertyOptional()
   @IsOptional() @Type(() => Number) @IsInt() @Min(0)
   offset?: number;
+}
+
+export class AdminOfferEditDto {
+  @ApiPropertyOptional() @IsOptional() @IsString() title?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() description?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() category?: string;
+  @ApiPropertyOptional() @IsOptional() @Type(() => Number) @IsNumber() discount_percent?: number;
+  @ApiPropertyOptional() @IsOptional() @Type(() => Number) @IsNumber() original_price?: number;
+  @ApiPropertyOptional() @IsOptional() @Type(() => Number) @IsNumber() offer_price?: number;
+  @ApiPropertyOptional() @IsOptional() @IsString() valid_from?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() valid_until?: string;
 }
 
 export class ReviewVendorDto {
