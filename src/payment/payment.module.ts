@@ -11,12 +11,12 @@ import { UserFcmToken } from '../entities/user-fcm-token.entity';
 import { Notification } from '../entities/notification.entity';
 import { NotificationOutbox } from '../entities/notification-outbox.entity';
 import { SiteSetting } from '../entities/site-setting.entity';
-import { RazorpayModule } from '../razorpay/razorpay.module';
+import { CashfreeModule } from '../cashfree/cashfree.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Payment, Vendor, User, SubscriptionPlan, UserFcmToken, Notification, NotificationOutbox, SiteSetting]),
-    RazorpayModule,
+    CashfreeModule,
   ],
   controllers: [PaymentController],
   providers: [PaymentService, PushService],

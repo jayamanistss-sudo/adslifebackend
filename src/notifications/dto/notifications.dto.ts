@@ -46,7 +46,11 @@ export class CreateTemplateDto {
   @ApiProperty({ enum: ['morning','lunch','evening','dinner','goodnight','weekend','reengage','personalized_search','interest_alert'] })
   @IsString()
   @IsNotEmpty()
-  @IsIn(['morning','lunch','evening','dinner','goodnight','weekend','reengage','personalized_search','interest_alert'])
+  // 'expiry_reminder' was previously missing from both this list and
+  // UpdateTemplateDto's — the expiry-reminder cron runs daily but had no
+  // valid template it was allowed to use, and the admin API would have
+  // rejected creating one even by hand.
+  @IsIn(['morning','lunch','evening','dinner','goodnight','weekend','reengage','personalized_search','interest_alert','expiry_reminder'])
   type!: string;
 
   @ApiProperty({ example: '🌅 Good Morning! Offers வந்திருக்கு' })
@@ -77,7 +81,7 @@ export class UpdateTemplateDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
-  @IsIn(['morning','lunch','evening','dinner','goodnight','weekend','reengage','personalized_search'])
+  @IsIn(['morning','lunch','evening','dinner','goodnight','weekend','reengage','personalized_search','interest_alert','expiry_reminder'])
   type?: string;
 
   @ApiPropertyOptional()

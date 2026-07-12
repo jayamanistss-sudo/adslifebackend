@@ -6,9 +6,10 @@ import { Offer } from '../entities/offer.entity';
 import { UserInteraction } from '../entities/user-interaction.entity';
 import { VendorDailyStat } from '../entities/vendor-daily-stat.entity';
 import { Vendor } from '../entities/vendor.entity';
+import { VendorFollower } from '../entities/vendor-follower.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Offer, UserInteraction, VendorDailyStat, Vendor])],
+  imports: [TypeOrmModule.forFeature([Offer, UserInteraction, VendorDailyStat, Vendor, VendorFollower])],
   controllers: [AnalyticsController],
   providers: [AnalyticsService],
 })

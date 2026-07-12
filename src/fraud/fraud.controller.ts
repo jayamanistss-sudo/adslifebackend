@@ -1,8 +1,9 @@
-import { Controller, Get, Post, Body, Param, Query, ParseIntPipe, UseGuards, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Controller, Get, Post, Put, Body, Param, Query, ParseIntPipe, UseGuards, BadRequestException, NotFoundException } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { FraudDetectorService } from '../services/fraud-detector.service';
+import { FraudConfigService } from '../services/fraud-config.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -21,6 +22,7 @@ import { FraudReviewDto } from './dto/fraud.dto';
 export class FraudController {
   constructor(
     private readonly fraud: FraudDetectorService,
+    private readonly fraudConfig: FraudConfigService,
     private readonly monitoring: MonitoringService,
     @InjectRepository(FraudFlag) private readonly fraudFlagRepo: Repository<FraudFlag>,
     @InjectRepository(Vendor) private readonly vendorRepo: Repository<Vendor>,
@@ -93,5 +95,38 @@ export class FraudController {
     }).catch(() => {}));
 
     return { success: true, data: { updated: true, cascaded_offers: cascadedOffers } };
+  }
+
+  // Every rule weight and both score thresholds were hardcoded constants —
+  // no admin lever to tune fraud sensitivity without a code deploy.
+  @Get('config')
+  async getConfig() {
+    const data = await this.fraudConfig.getConfig();
+    return { success: true, data };
+  }
+
+  @Put('config')
+  @Roles('super')
+  async updateConfig(@CurrentUser() admin: any, @Body() patch: Record<string, number>) {
+    const data = await this.fraudConfig.setConfig(patch);
+    setImmediate(() => this.monitoring.logActivity({
+      userId: admin.user_id, role: 'admin', action: 'admin_fraud_config_update',
+      entityType: 'site_settings', entityId: 0,
+      description: `Admin updated fraud config: ${Object.keys(patch).join(', ')}`,
+      metadata: patch,
+    }).catch(() => {}));
+    return { success: true, data, message: 'Fraud config updated' };
+  }
+
+  @Put('config/reset')
+  @Roles('super')
+  async resetConfig(@CurrentUser() admin: any) {
+    const data = await this.fraudConfig.resetToDefaults();
+    setImmediate(() => this.monitoring.logActivity({
+      userId: admin.user_id, role: 'admin', action: 'admin_fraud_config_reset',
+      entityType: 'site_settings', entityId: 0,
+      description: 'Admin reset fraud config to defaults',
+    }).catch(() => {}));
+    return { success: true, data, message: 'Fraud config reset to defaults' };
   }
 }

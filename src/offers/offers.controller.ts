@@ -19,6 +19,11 @@ import { Repository } from 'typeorm';
 import { RedemptionCode } from '../entities/redemption-code.entity';
 import { Offer } from '../entities/offer.entity';
 
+// A redemption code previously had no expiry at all — a code generated
+// today was valid forever, letting it be hoarded or shared well past its
+// intended use.
+const REDEMPTION_CODE_EXPIRY_HOURS = 48;
+
 @ApiTags('offers')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -40,24 +45,28 @@ export class OffersController {
     });
     if (!offer) return { success: false, error: 'Offer not found' };
 
-    // Reuse an unexpired pending code so repeated opens show the same one
+    // Reuse an unexpired pending code so repeated opens show the same one —
+    // the comment always said "unexpired" but no expiry mechanism existed
+    // to actually check; a code generated once was valid forever.
     let rc = await this.redemptionRepo.findOne({
       where: { offer_id: offerId, user_id: user.user_id, status: 'pending' },
     });
+    if (rc && rc.expires_at && rc.expires_at < new Date()) rc = null;
     if (!rc) {
       // 6 chars, no confusables (0/O, 1/I)
       const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+      const expiresAt = new Date(Date.now() + REDEMPTION_CODE_EXPIRY_HOURS * 3600 * 1000);
       for (let attempt = 0; attempt < 5 && !rc; attempt++) {
         const code = Array.from({ length: 6 },
           () => alphabet[Math.floor(Math.random() * alphabet.length)]).join('');
         try {
           rc = await this.redemptionRepo.save(
-            this.redemptionRepo.create({ offer_id: offerId, user_id: user.user_id, code }));
+            this.redemptionRepo.create({ offer_id: offerId, user_id: user.user_id, code, expires_at: expiresAt }));
         } catch { /* code collision — retry */ }
       }
       if (!rc) return { success: false, error: 'Could not generate code, try again' };
     }
-    return { success: true, data: { code: rc.code, offer_title: offer.title } };
+    return { success: true, data: { code: rc.code, offer_title: offer.title, expires_at: rc.expires_at } };
   }
 
   @Public()

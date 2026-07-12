@@ -8,9 +8,14 @@ import { Vendor } from '../entities/vendor.entity';
 import { Offer } from '../entities/offer.entity';
 import { VendorDailyStat } from '../entities/vendor-daily-stat.entity';
 import { Payment } from '../entities/payment.entity';
+import { Category } from '../entities/category.entity';
+import { Notification } from '../entities/notification.entity';
+import { NotificationOutbox } from '../entities/notification-outbox.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([AuthLog, User, Vendor, Offer, VendorDailyStat, Payment])],
+  imports: [TypeOrmModule.forFeature([
+    AuthLog, User, Vendor, Offer, VendorDailyStat, Payment, Category, Notification, NotificationOutbox,
+  ])],
   controllers: [AdminAnalyticsController],
   providers: [AdminAnalyticsService],
 })

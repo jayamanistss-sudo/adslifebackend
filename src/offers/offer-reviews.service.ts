@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 import { OfferReview } from '../entities/offer-review.entity';
 import { Offer } from '../entities/offer.entity';
 import { Vendor } from '../entities/vendor.entity';
+import { PushService } from '../services/push.service';
 
 @Injectable()
 export class OfferReviewsService {
@@ -11,6 +12,7 @@ export class OfferReviewsService {
     @InjectRepository(OfferReview) private readonly reviewRepo: Repository<OfferReview>,
     @InjectRepository(Offer) private readonly offerRepo: Repository<Offer>,
     @InjectRepository(Vendor) private readonly vendorRepo: Repository<Vendor>,
+    private readonly push: PushService,
   ) {}
 
   async list(offerId: number, page = 1, perPage = 10, userId?: number) {
@@ -29,12 +31,21 @@ export class OfferReviewsService {
       ])
       .where('r.offer_id = :offerId', { offerId })
       .andWhere('r.hidden_by_admin = false')
+      // Only genuine written feedback in the feed — a bare star rating with
+      // no comment isn't "customer feedback" to read, it's just a number,
+      // which the aggregate rating below still fully accounts for.
+      .andWhere("r.comment IS NOT NULL AND trim(r.comment) != ''")
       .orderBy('r.created_at', 'DESC')
       .offset((page - 1) * perPage)
       .limit(perPage)
       .getRawMany();
 
-    const total = await this.reviewRepo.count({ where: { offer_id: offerId, hidden_by_admin: false } });
+    const total = await this.reviewRepo
+      .createQueryBuilder('r')
+      .where('r.offer_id = :offerId', { offerId })
+      .andWhere('r.hidden_by_admin = false')
+      .andWhere("r.comment IS NOT NULL AND trim(r.comment) != ''")
+      .getCount();
     const { avgRating, reviewCount } = await this.getAggregate(offerId);
     const myReview = userId ? await this.getMine(offerId, userId) : null;
 
@@ -53,7 +64,7 @@ export class OfferReviewsService {
     }
 
     // Previously unguarded — a vendor could rate their own offer.
-    const offer = await this.offerRepo.findOne({ where: { id: offerId }, select: ['id', 'vendor_id'] });
+    const offer = await this.offerRepo.findOne({ where: { id: offerId }, select: ['id', 'vendor_id', 'title'] });
     if (!offer) throw new NotFoundException('Offer not found');
     const vendor = await this.vendorRepo.findOne({ where: { id: offer.vendor_id }, select: ['user_id'] });
     if (vendor?.user_id === userId) {
@@ -66,9 +77,18 @@ export class OfferReviewsService {
       existing.comment = comment ?? null;
       return this.reviewRepo.save(existing);
     }
-    return this.reviewRepo.save(
+    const saved = await this.reviewRepo.save(
       this.reviewRepo.create({ offer_id: offerId, user_id: userId, rating, comment: comment ?? null }),
     );
+    // Only on a genuinely new review, not every edit — a vendor previously
+    // had no way to find out a review came in without checking the app.
+    if (vendor?.user_id) {
+      await this.push.send(
+        vendor.user_id, '⭐ New Review', `You got a ${rating}-star review on "${offer.title}"`,
+        { type: 'new_review', route: '/vendor/reviews', offer_id: String(offerId) },
+      );
+    }
+    return saved;
   }
 
   async getAggregate(offerId: number): Promise<{ avgRating: number | null; reviewCount: number }> {

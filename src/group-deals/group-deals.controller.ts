@@ -9,6 +9,7 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Public } from '../common/decorators/public.decorator';
+import { CreateGroupDealDto } from './dto/create-group-deal.dto';
 
 @ApiTags('group-deals')
 @Controller('group-deals')
@@ -31,7 +32,7 @@ export class GroupDealsController {
   @Post()
   async create(
     @CurrentUser() user: any,
-    @Body() dto: { offer_id: number; min_members: number; max_members?: number; duration_hours?: number },
+    @Body() dto: CreateGroupDealDto,
   ) {
     const data = await this.groupDealsService.create(user.user_id, user.role, dto);
     return { success: true, data };

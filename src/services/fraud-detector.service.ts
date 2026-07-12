@@ -5,12 +5,7 @@ import { FraudFlag } from '../entities/fraud-flag.entity';
 import { Vendor } from '../entities/vendor.entity';
 import { Offer } from '../entities/offer.entity';
 import { User } from '../entities/user.entity';
-
-const RULES: Record<string, number> = {
-  duplicate_business_name: 25, suspicious_discount: 20, no_website_no_gst: 15,
-  bulk_offer_creation: 20, copied_description: 25, invalid_phone_pattern: 15,
-  missing_location_data: 10, newly_registered_bulk_post: 20,
-};
+import { FraudConfigService, FraudConfig } from './fraud-config.service';
 
 @Injectable()
 export class FraudDetectorService {
@@ -18,9 +13,11 @@ export class FraudDetectorService {
     @InjectRepository(FraudFlag) private readonly fraudFlagRepo: Repository<FraudFlag>,
     @InjectRepository(Vendor) private readonly vendorRepo: Repository<Vendor>,
     @InjectRepository(Offer) private readonly offerRepo: Repository<Offer>,
+    private readonly fraudConfig: FraudConfigService,
   ) {}
 
   async checkVendor(vendorId: number) {
+    const rules = await this.fraudConfig.getConfig();
     const vendor = await this.vendorRepo
       .createQueryBuilder('v')
       .innerJoin(User, 'u', 'u.id = v.user_id')
@@ -40,10 +37,10 @@ export class FraudDetectorService {
         exact: vendor.business_name,
       })
       .getOne();
-    if (dupName) { score += RULES.duplicate_business_name; flags.push('duplicate_business_name'); }
+    if (dupName) { score += rules.duplicate_business_name; flags.push('duplicate_business_name'); }
 
     if (!vendor.website && !vendor.gst_number) {
-      score += RULES.no_website_no_gst; flags.push('no_website_no_gst');
+      score += rules.no_website_no_gst; flags.push('no_website_no_gst');
     }
 
     const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
@@ -52,32 +49,33 @@ export class FraudDetectorService {
       .where('o.vendor_id = :id', { id: vendorId })
       .andWhere('o.created_at >= :since', { since: oneHourAgo })
       .getCount();
-    if (bulkCount > 10) { score += RULES.bulk_offer_creation; flags.push('bulk_offer_creation'); }
+    if (bulkCount > 10) { score += rules.bulk_offer_creation; flags.push('bulk_offer_creation'); }
 
     const phone = (vendor.phone || '').replace(/\D/g, '');
     if (phone && (/^(\d)\1{9,}$/.test(phone) || ['1234567890', '9876543210', '0000000000'].includes(phone))) {
-      score += RULES.invalid_phone_pattern; flags.push('invalid_phone_pattern');
+      score += rules.invalid_phone_pattern; flags.push('invalid_phone_pattern');
     }
 
-    if (!vendor.lat || !vendor.lng) { score += RULES.missing_location_data; flags.push('missing_location_data'); }
+    if (!vendor.lat || !vendor.lng) { score += rules.missing_location_data; flags.push('missing_location_data'); }
 
     const ageHours = (Date.now() - new Date(vendor.user_created_at).getTime()) / 3600000;
     const offerCount = await this.offerRepo.count({ where: { vendor_id: vendorId } });
     if (ageHours < 24 && offerCount > 5) {
-      score += RULES.newly_registered_bulk_post; flags.push('newly_registered_bulk_post');
+      score += rules.newly_registered_bulk_post; flags.push('newly_registered_bulk_post');
     }
 
-    return this.buildResult(score, flags, 'vendor', vendorId);
+    return this.buildResult(score, flags, 'vendor', vendorId, rules);
   }
 
   async checkOffer(offerId: number) {
+    const rules = await this.fraudConfig.getConfig();
     const offer = await this.offerRepo.findOne({ where: { id: offerId } });
     if (!offer) return { score: 0, flags: [], action: 'none' };
 
     let score = 0; const flags: string[] = [];
 
     if (Number.parseFloat(String(offer.discount_percent)) > 80) {
-      score += RULES.suspicious_discount; flags.push('suspicious_discount');
+      score += rules.suspicious_discount; flags.push('suspicious_discount');
     }
 
     if (offer.description) {
@@ -86,37 +84,37 @@ export class FraudDetectorService {
         .where('MD5(o.description) = MD5(:desc)', { desc: offer.description })
         .andWhere('o.id != :id', { id: offerId })
         .getOne();
-      if (dup) { score += RULES.copied_description; flags.push('copied_description'); }
+      if (dup) { score += rules.copied_description; flags.push('copied_description'); }
     }
 
-    return this.buildResult(score, flags, 'offer', offerId);
+    return this.buildResult(score, flags, 'offer', offerId, rules);
   }
 
-  private async buildResult(score: number, flags: string[], type: string, entityId: number) {
+  private async buildResult(score: number, flags: string[], type: string, entityId: number, rules: FraudConfig) {
     let action: string;
-    if (score >= 85) action = 'auto_reject';
-    else if (score >= 60) action = 'flag_review';
+    if (score >= rules.auto_reject_threshold) action = 'auto_reject';
+    else if (score >= rules.flag_review_threshold) action = 'flag_review';
     else action = 'none';
 
-    const riskLevel = score >= 85 ? 'high' : score >= 60 ? 'medium' : 'low';
+    const riskLevel = score >= rules.auto_reject_threshold ? 'high' : score >= rules.flag_review_threshold ? 'medium' : 'low';
 
     if (action !== 'none') {
-      const existing = await this.fraudFlagRepo.findOne({
-        where: { entity_type: type as any, entity_id: entityId },
-      });
-      if (existing) {
-        await this.fraudFlagRepo.update(existing.id, {
-          flag_reason: flags.join(', '),
-          confidence_score: score,
-        });
-      } else {
-        await this.fraudFlagRepo.save({
+      // find-then-insert/update raced against a unique (entity_type,
+      // entity_id) constraint on this table (see fraud-flag.entity.ts) —
+      // two concurrent checks for the same entity (e.g. a vendor's own
+      // bulk_offer_creation rule firing repeatedly) could both see "no
+      // existing flag" and both try to insert, so the loser hit an
+      // unhandled duplicate-key error instead of just updating. A single
+      // upsert against that same constraint is atomic and needs no lock.
+      await this.fraudFlagRepo.upsert(
+        {
           entity_type: type as any,
           entity_id: entityId,
           flag_reason: flags.join(', '),
           confidence_score: score,
-        });
-      }
+        },
+        ['entity_type', 'entity_id'],
+      );
     }
     return { score, flags, action, max_score: 100, risk_level: riskLevel };
   }

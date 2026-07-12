@@ -7,6 +7,9 @@ import { Vendor } from '../entities/vendor.entity';
 import { Offer } from '../entities/offer.entity';
 import { VendorDailyStat } from '../entities/vendor-daily-stat.entity';
 import { Payment } from '../entities/payment.entity';
+import { Category } from '../entities/category.entity';
+import { Notification } from '../entities/notification.entity';
+import { NotificationOutbox } from '../entities/notification-outbox.entity';
 
 @Injectable()
 export class AdminAnalyticsService {
@@ -17,6 +20,9 @@ export class AdminAnalyticsService {
     @InjectRepository(Offer) private readonly offerRepo: Repository<Offer>,
     @InjectRepository(VendorDailyStat) private readonly dailyStatRepo: Repository<VendorDailyStat>,
     @InjectRepository(Payment) private readonly paymentRepo: Repository<Payment>,
+    @InjectRepository(Category) private readonly categoryRepo: Repository<Category>,
+    @InjectRepository(Notification) private readonly notificationRepo: Repository<Notification>,
+    @InjectRepository(NotificationOutbox) private readonly outboxRepo: Repository<NotificationOutbox>,
   ) {}
 
   // ─── Logins & session activity ───────────────────────────────────────────
@@ -136,5 +142,59 @@ export class AdminAnalyticsService {
       redemptions_by_city: redemptionsByCity,
       revenue_by_city: revenueByCity,
     };
+  }
+
+  // Categories only ever surfaced a live offer-count (used to sort the
+  // public browse list) — no admin visibility into which drive views/
+  // clicks/redemptions, a natural question for deciding what to promote.
+  async categoryPerformance(limit = 20) {
+    const rows = await this.offerRepo
+      .createQueryBuilder('o')
+      .innerJoin(Category, 'c', 'c.id = o.category_id')
+      .select([
+        'c.name AS category', 'c.slug AS slug',
+        'COUNT(DISTINCT o.id) AS offer_count',
+        'COALESCE(SUM(o.views),0) AS total_views',
+        'COALESCE(SUM(o.clicks),0) AS total_clicks',
+        'COALESCE(SUM(o.saves),0) AS total_saves',
+        'COALESCE(SUM(o.current_redemptions),0) AS total_redemptions',
+      ])
+      .groupBy('c.id, c.name, c.slug')
+      .orderBy('total_views', 'DESC')
+      .limit(limit)
+      .getRawMany();
+    return { by_category: rows };
+  }
+
+  // Notification work (templates, AI generation, per-activity toggles) had
+  // no visibility into whether any of it actually performs — admin could
+  // see template counts, never open/delivery rates.
+  async campaignAnalytics(days = 30) {
+    const since = new Date(Date.now() - days * 86400000);
+
+    const [sentByType, openedByType, deliveryByStatus] = await Promise.all([
+      this.notificationRepo.createQueryBuilder('n')
+        .select(['n.type AS type', 'COUNT(*) AS sent'])
+        .where('n.created_at >= :since', { since })
+        .groupBy('n.type').orderBy('sent', 'DESC').getRawMany(),
+      this.notificationRepo.createQueryBuilder('n')
+        .select(['n.type AS type', 'COUNT(*) AS opened'])
+        .where('n.created_at >= :since AND n.is_read = true', { since })
+        .groupBy('n.type').getRawMany(),
+      this.outboxRepo.createQueryBuilder('o')
+        .select(['o.status AS status', 'COUNT(*) AS cnt'])
+        .where('o.created_at >= :since', { since })
+        .groupBy('o.status').getRawMany(),
+    ]);
+
+    const openedMap = Object.fromEntries(openedByType.map((r: any) => [r.type, +r.opened]));
+    const byType = sentByType.map((r: any) => ({
+      type: r.type,
+      sent: +r.sent,
+      opened: openedMap[r.type] ?? 0,
+      open_rate: +r.sent > 0 ? Math.round(((openedMap[r.type] ?? 0) / +r.sent) * 1000) / 10 : 0,
+    }));
+
+    return { by_type: byType, delivery_by_status: deliveryByStatus };
   }
 }

@@ -7,9 +7,10 @@ import { UserFcmToken } from '../entities/user-fcm-token.entity';
 import { Notification } from '../entities/notification.entity';
 import { NotificationOutbox } from '../entities/notification-outbox.entity';
 import { PushService } from '../services/push.service';
+import { ReferralModule } from '../referral/referral.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([VendorApplication, User, UserFcmToken, Notification, NotificationOutbox])],
+  imports: [TypeOrmModule.forFeature([VendorApplication, User, UserFcmToken, Notification, NotificationOutbox]), ReferralModule],
   controllers: [VendorApplyController],
   providers: [PushService],
 })

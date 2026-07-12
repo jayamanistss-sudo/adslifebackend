@@ -1,30 +1,48 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import * as nodemailer from 'nodemailer';
+import { SiteSetting } from '../entities/site-setting.entity';
 
 @Injectable()
 export class MailService {
+  constructor(
+    @InjectRepository(SiteSetting) private readonly settingRepo: Repository<SiteSetting>,
+  ) {}
+
   private readonly logger = new Logger(MailService.name);
 
-  private readonly transporter = process.env.SMTP_USER && process.env.SMTP_PASS
-    ? nodemailer.createTransport({
-        host: process.env.SMTP_HOST || 'smtp.gmail.com',
-        port: Number(process.env.SMTP_PORT) || 587,
-        secure: false,
-        auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
-      })
-    : null;
-
-  get isConfigured(): boolean {
-    return this.transporter !== null;
+  // Reads live from site_settings (admin-editable in Site Settings) on every
+  // send, falling back to the .env values for any key the admin hasn't set
+  // via the panel yet — lets SMTP credentials be rotated with no restart,
+  // replacing the old transporter built once from env vars at class init.
+  private async getConfig() {
+    const rows = await this.settingRepo.find({
+      where: [
+        { key: 'smtp_host' }, { key: 'smtp_port' },
+        { key: 'smtp_user' }, { key: 'smtp_password' },
+      ],
+    });
+    const db = Object.fromEntries(rows.map((r) => [r.key, r.value]));
+    return {
+      host: db.smtp_host || process.env.SMTP_HOST || 'smtp.gmail.com',
+      port: Number(db.smtp_port || process.env.SMTP_PORT) || 587,
+      user: db.smtp_user || process.env.SMTP_USER || '',
+      pass: db.smtp_password || process.env.SMTP_PASS || '',
+    };
   }
 
   async send(to: string, subject: string, html: string): Promise<void> {
-    if (!this.transporter) {
+    const { host, port, user, pass } = await this.getConfig();
+    if (!user || !pass) {
       this.logger.log(`Would send "${subject}" to ${to} (SMTP not configured)`);
       return;
     }
-    await this.transporter.sendMail({
-      from: `"AdsLife" <${process.env.SMTP_USER}>`,
+    const transporter = nodemailer.createTransport({
+      host, port, secure: false, auth: { user, pass },
+    });
+    await transporter.sendMail({
+      from: `"AdsLife" <${user}>`,
       to,
       subject,
       html,
@@ -252,6 +270,90 @@ export class MailService {
       await this.send(toEmail, 'Update on your AdsLife vendor application', html);
     } catch (err: any) {
       this.logger.warn(`Vendor rejected email failed for ${toEmail}: ${err.message}`);
+    }
+  }
+
+  private statRow(label: string, value: number | string): string {
+    return `<tr><td style="padding:8px 0;color:#555;font-size:14px;">${label}</td><td style="padding:8px 0;color:#333;font-size:16px;font-weight:700;text-align:right;">${value}</td></tr>`;
+  }
+
+  async sendOfferActivityEmail(
+    toEmail: string, name: string, businessName: string,
+    stats: { views: number; clicks: number; saves: number; redemptions: number; reviews: number },
+  ): Promise<void> {
+    const appUrl = process.env.APP_URL || 'https://adslife.in';
+    const html = `
+      <div style="font-family:sans-serif;max-width:520px;margin:0 auto;padding:24px;background:#f9f9f9;">
+        <div style="background:#FF6200;padding:20px 24px;border-radius:12px 12px 0 0;text-align:center;">
+          <h1 style="color:#fff;margin:0;font-size:24px;">AdsLife</h1>
+          <p style="color:#ffe0cc;margin:4px 0 0;font-size:13px;">Discover · Earn · Win</p>
+        </div>
+        <div style="background:#fff;padding:24px;border-radius:0 0 12px 12px;border:1px solid #eee;">
+          <p style="font-size:16px;color:#333;">Hi <strong>${name}</strong>,</p>
+          <p style="color:#555;font-size:14px;line-height:1.6;">
+            Here's what happened with <strong>${businessName}</strong>'s offers in the last 24 hours:
+          </p>
+          <table style="width:100%;border-collapse:collapse;background:#fff8f4;border:1px solid #ffe0cc;border-radius:10px;padding:4px 16px;margin:16px 0;">
+            ${this.statRow('Views', stats.views)}
+            ${this.statRow('Clicks', stats.clicks)}
+            ${this.statRow('Saves', stats.saves)}
+            ${this.statRow('Redemptions', stats.redemptions)}
+            ${this.statRow('New reviews', stats.reviews)}
+          </table>
+          <a href="${appUrl}/vendor/analytics" style="display:block;text-align:center;background:#FF6200;color:#fff;padding:14px;border-radius:10px;text-decoration:none;font-size:16px;font-weight:600;margin:20px 0;">
+            View Full Analytics
+          </a>
+          <p style="color:#aaa;font-size:11px;text-align:center;">
+            Turn off these emails anytime from Vendor Settings.
+          </p>
+        </div>
+      </div>`;
+
+    try {
+      await this.send(toEmail, `📈 ${businessName}: ${stats.views} views today on AdsLife`, html);
+    } catch (err: any) {
+      this.logger.warn(`Offer activity email failed for ${toEmail}: ${err.message}`);
+    }
+  }
+
+  async sendMonthlyReportEmail(
+    toEmail: string, name: string, businessName: string, monthLabel: string,
+    stats: { views: number; clicks: number; saves: number; redemptions: number; newFollowers: number; newReviews: number; avgRating: number },
+  ): Promise<void> {
+    const appUrl = process.env.APP_URL || 'https://adslife.in';
+    const html = `
+      <div style="font-family:sans-serif;max-width:520px;margin:0 auto;padding:24px;background:#f9f9f9;">
+        <div style="background:#FF6200;padding:20px 24px;border-radius:12px 12px 0 0;text-align:center;">
+          <h1 style="color:#fff;margin:0;font-size:24px;">AdsLife</h1>
+          <p style="color:#ffe0cc;margin:4px 0 0;font-size:13px;">Discover · Earn · Win</p>
+        </div>
+        <div style="background:#fff;padding:24px;border-radius:0 0 12px 12px;border:1px solid #eee;">
+          <p style="font-size:16px;color:#333;">Hi <strong>${name}</strong>,</p>
+          <p style="color:#555;font-size:14px;line-height:1.6;">
+            Here's <strong>${businessName}</strong>'s performance summary for <strong>${monthLabel}</strong>:
+          </p>
+          <table style="width:100%;border-collapse:collapse;background:#fff8f4;border:1px solid #ffe0cc;border-radius:10px;padding:4px 16px;margin:16px 0;">
+            ${this.statRow('Views', stats.views)}
+            ${this.statRow('Clicks', stats.clicks)}
+            ${this.statRow('Saves', stats.saves)}
+            ${this.statRow('Redemptions', stats.redemptions)}
+            ${this.statRow('New followers', stats.newFollowers)}
+            ${this.statRow('New reviews', stats.newReviews)}
+            ${this.statRow('Average rating', stats.avgRating > 0 ? `${stats.avgRating.toFixed(1)} ★` : '—')}
+          </table>
+          <a href="${appUrl}/vendor/analytics" style="display:block;text-align:center;background:#FF6200;color:#fff;padding:14px;border-radius:10px;text-decoration:none;font-size:16px;font-weight:600;margin:20px 0;">
+            View Full Analytics
+          </a>
+          <p style="color:#aaa;font-size:11px;text-align:center;">
+            Turn off these emails anytime from Vendor Settings.
+          </p>
+        </div>
+      </div>`;
+
+    try {
+      await this.send(toEmail, `📊 Your ${monthLabel} report — ${businessName}`, html);
+    } catch (err: any) {
+      this.logger.warn(`Monthly report email failed for ${toEmail}: ${err.message}`);
     }
   }
 }

@@ -97,6 +97,46 @@ export class SpotlightController {
       return { success: false, error: 'Spotlight isn\'t included in your current plan. Upgrade to unlock it.', code: 'PLAN_FEATURE_LOCKED' };
     }
 
+    // "Free Promotion: 1/Month" (Pro tier) — spotlight itself has always
+    // been a free (unpaid), plan-gated action; this adds the monthly pacing
+    // the plan table promises to every vendor with 'spotlight' access,
+    // reusing spotlight_requests directly rather than a separate credit
+    // ledger or a second feature flag (only Pro has 'spotlight' today, so
+    // this quota applies exactly where the table says it should — revisit
+    // if a future plan gets 'spotlight' without the monthly cap). A
+    // rejected request doesn't burn the vendor's monthly allowance.
+    if (user.role !== 'admin') {
+      // The count-check and the insert must happen inside the SAME locked
+      // transaction — checking the quota in one transaction and inserting
+      // in a separate call afterward still races: a second request could
+      // acquire the lock and re-check the count in the gap between the
+      // first request's count-check and its (unlocked) insert, so both
+      // would see "quota available" and a vendor could claim 2+ free
+      // spotlights inside the 30-day window the plan promises only 1 for.
+      const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+      const spotlight = await this.spotlightRepo.manager.transaction(async (em) => {
+        await em.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`spotlight:${vendor.id}`]);
+        const usedThisMonth = await em
+          .createQueryBuilder(SpotlightRequest, 'sr')
+          .where('sr.vendor_id = :vendorId', { vendorId: vendor.id })
+          .andWhere('sr.status != :rejected', { rejected: 'rejected' })
+          .andWhere('sr.created_at >= :since', { since: thirtyDaysAgo })
+          .getCount();
+        if (usedThisMonth > 0) return null;
+        return em.getRepository(SpotlightRequest).save({
+          vendor_id: vendor.id,
+          offer_id: dto.offer_id ?? null,
+          message: dto.message ?? null,
+          duration_days: dto.duration_days ?? 7,
+          status: 'pending',
+        });
+      });
+      if (!spotlight) {
+        return { success: false, error: "You've already used this month's free promotion. Your next one unlocks 30 days after your last request.", code: 'PROMOTION_QUOTA_USED' };
+      }
+      return { success: true, data: { id: spotlight.id, status: 'pending' } };
+    }
+
     const spotlight = await this.spotlightRepo.save({
       vendor_id: vendor.id,
       offer_id: dto.offer_id ?? null,
@@ -115,7 +155,10 @@ export class SpotlightController {
     const spotlight = await this.spotlightRepo.findOne({ where: { id } });
     if (!spotlight) throw new NotFoundException('Spotlight request not found');
 
-    const updateData: Partial<SpotlightRequest> = { status: dto.status };
+    // Repository.update() is a bulk QueryBuilder update, not a save() on a
+    // loaded entity — @UpdateDateColumn only auto-fires on save(), so it's
+    // set explicitly here.
+    const updateData: Partial<SpotlightRequest> = { status: dto.status, updated_at: new Date() };
     if (dto.status === 'approved') {
       const days = dto.duration_days ?? 7;
       const now = new Date();
@@ -129,7 +172,7 @@ export class SpotlightController {
     const user = vendor ? await this.userRepo.findOne({ where: { id: vendor.user_id }, select: ['id', 'name', 'email'] }) : null;
     if (user) {
       if (dto.status === 'approved') {
-        await this.push.send(user.id, 'Spotlight Approved!', `Your spotlight request for ${vendor?.business_name ?? 'your business'} was approved.`, { type: 'spotlight_approved' });
+        await this.push.send(user.id, 'Spotlight Approved!', `Your spotlight request for ${vendor?.business_name ?? 'your business'} was approved.`, { type: 'spotlight_approved', route: '/vendor/offers' });
         if (user.email && await this.notificationSettings.isEnabled('spotlight_approved', 'email')) {
           await this.mail.sendStatusEmail(
             user.email, user.name, 'Your spotlight request was approved 🎉',
@@ -137,7 +180,7 @@ export class SpotlightController {
           );
         }
       } else {
-        await this.push.send(user.id, 'Spotlight Update', 'Your spotlight request was not approved this time.', { type: 'spotlight_rejected' });
+        await this.push.send(user.id, 'Spotlight Update', 'Your spotlight request was not approved this time.', { type: 'spotlight_rejected', route: '/vendor/offers' });
         if (user.email && await this.notificationSettings.isEnabled('spotlight_rejected', 'email')) {
           await this.mail.sendStatusEmail(
             user.email, user.name, 'Update on your spotlight request',

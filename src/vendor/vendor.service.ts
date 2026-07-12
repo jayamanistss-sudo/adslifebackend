@@ -6,8 +6,11 @@ import { Vendor } from '../entities/vendor.entity';
 import { VendorFollower } from '../entities/vendor-follower.entity';
 import { User } from '../entities/user.entity';
 import { Offer } from '../entities/offer.entity';
+import { OfferReview } from '../entities/offer-review.entity';
 import { UserInteraction } from '../entities/user-interaction.entity';
 import { SubscriptionPlan } from '../entities/subscription-plan.entity';
+import { PlanFeaturesService } from '../plan-features/plan-features.service';
+import { PushService } from '../services/push.service';
 
 function pctChange(cur: number, prev: number): string {
   if (prev === 0) return cur > 0 ? '+100%' : '0%';
@@ -22,9 +25,12 @@ export class VendorService {
     @InjectRepository(VendorFollower) private readonly followerRepo: Repository<VendorFollower>,
     @InjectRepository(User) private readonly userRepo: Repository<User>,
     @InjectRepository(Offer) private readonly offerRepo: Repository<Offer>,
+    @InjectRepository(OfferReview) private readonly reviewRepo: Repository<OfferReview>,
     @InjectRepository(UserInteraction) private readonly interactionRepo: Repository<UserInteraction>,
     @InjectRepository(SubscriptionPlan) private readonly planRepo: Repository<SubscriptionPlan>,
     @InjectDataSource() private readonly dataSource: DataSource,
+    private readonly planFeatures: PlanFeaturesService,
+    private readonly push: PushService,
   ) {}
 
   async dashboard(userId: number) {
@@ -47,7 +53,7 @@ export class VendorService {
     const sixtyDaysAgo  = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000);
     const fourteenDaysAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
 
-    const [offerSummary, recentOffers, cur, prev, hourRows, dailyTrend] = await Promise.all([
+    const [offerSummary, recentOffers, cur, prev, hourRows, dailyTrend, reviewSummary] = await Promise.all([
       this.offerRepo.createQueryBuilder('o')
         .select([
           'COUNT(*) AS total_offers',
@@ -111,6 +117,12 @@ export class VendorService {
         .groupBy('ui.created_at::date')
         .orderBy('stat_date', 'ASC')
         .getRawMany(),
+
+      this.reviewRepo.createQueryBuilder('r')
+        .innerJoin(Offer, 'o', 'o.id = r.offer_id')
+        .select(['COUNT(*) AS total_reviews', 'COALESCE(AVG(r.rating),0) AS avg_rating'])
+        .where('o.vendor_id = :vendorId', { vendorId })
+        .getRawOne(),
     ]);
 
     const peakHours = Array(24).fill(0);
@@ -122,6 +134,24 @@ export class VendorService {
     const curEng  = curImp  > 0 ? Math.round(((curClk  + curSv)  / curImp)  * 10000) / 100 : 0;
     const prevEng = prevImp > 0 ? Math.round(((prevClk + prevSv) / prevImp) * 10000) / 100 : 0;
 
+    // Granular per-metric gating — the response always carries the real
+    // numbers (never stripped/undefined, so the UI never crashes reaching
+    // for a missing key); `locked` tells the frontend which cards to render
+    // blurred with an upgrade CTA instead of hiding them outright. Actual
+    // PII (who/when — the audience "details" drill-down, followers list)
+    // stays hard-gated elsewhere; this is just the soft aggregate-count tease.
+    const [viewCount, clickCount, saveCount, redeemedCount, subscriberCount, viewsGraph, hasFullAnalytics, reviewAccess, aiGeneration] = await Promise.all([
+      this.planFeatures.vendorHasFeature(vendorId, 'view_count'),
+      this.planFeatures.vendorHasFeature(vendorId, 'click_count'),
+      this.planFeatures.vendorHasFeature(vendorId, 'save_count'),
+      this.planFeatures.vendorHasFeature(vendorId, 'redeemed_count'),
+      this.planFeatures.vendorHasFeature(vendorId, 'subscriber_count'),
+      this.planFeatures.vendorHasFeature(vendorId, 'analytics_views_graph'),
+      this.planFeatures.vendorHasFeature(vendorId, 'analytics_full'),
+      this.planFeatures.vendorHasFeature(vendorId, 'review_access'),
+      this.planFeatures.vendorHasFeature(vendorId, 'ai_generation'),
+    ]);
+
     return {
       vendor: {
         id: vendorId,
@@ -130,27 +160,45 @@ export class VendorService {
         status: vendor.status,
         logo_url: vendor.logo_url,
         total_followers: +vendor.live_followers || 0,
+        total_reviews: +reviewSummary?.total_reviews || 0,
+        avg_rating: Math.round((+reviewSummary?.avg_rating || 0) * 10) / 10,
         subscription_plan: vendor.subscription_plan,
         plan_name: vendor.plan_name || vendor.subscription_plan,
         plan_max_offers: +vendor.max_offers || 0,
       },
       stats: {
-        impressions: curImp, clicks: curClk, saves: curSv, engagement_rate: curEng,
+        impressions: curImp,
         impressions_trend: pctChange(curImp, prevImp),
+        clicks: curClk, saves: curSv,
         clicks_trend: pctChange(curClk, prevClk),
         saves_trend: pctChange(curSv, prevSv),
-        engagement_trend: pctChange(Math.round(curEng), Math.round(prevEng)),
+        ...(hasFullAnalytics ? {
+          engagement_rate: curEng,
+          engagement_trend: pctChange(Math.round(curEng), Math.round(prevEng)),
+        } : {}),
       },
       offers: {
         total: +offerSummary?.total_offers || 0, active: +offerSummary?.active_offers || 0,
         inactive: +offerSummary?.inactive_offers || 0, expired: +offerSummary?.expired_offers || 0,
-        total_views: +offerSummary?.total_views || 0, total_clicks: +offerSummary?.total_clicks || 0,
+        total_views: +offerSummary?.total_views || 0,
+        total_clicks: +offerSummary?.total_clicks || 0,
         total_saves: +offerSummary?.total_saves || 0,
         total_redemptions: +offerSummary?.total_redemptions || 0,
       },
       recent_offers: recentOffers,
       peak_hours: peakHours,
-      daily_trend: dailyTrend,
+      daily_trend: viewsGraph ? dailyTrend : [],
+      locked: {
+        view_count: !viewCount,
+        click_count: !clickCount,
+        save_count: !saveCount,
+        redeemed_count: !redeemedCount,
+        subscriber_count: !subscriberCount,
+        analytics_views_graph: !viewsGraph,
+        engagement: !hasFullAnalytics,
+        review_access: !reviewAccess,
+        ai_generation: !aiGeneration,
+      },
     };
   }
 
@@ -180,14 +228,27 @@ export class VendorService {
     if (!vendor) throw new NotFoundException('Vendor not found');
 
     // Public vendor page needs the full picture in one call
-    const [followersCount, offers] = await Promise.all([
+    const [followersCount, offers, badgeTier, ratingRow] = await Promise.all([
       this.followerRepo.count({ where: { vendor_id: vendorId } }),
       this.offerRepo.find({
         where: { vendor_id: vendorId, is_active: true },
         order: { created_at: 'DESC' },
       }),
+      this.planFeatures.badgeTierForPlan(vendor.subscription_plan ?? 'starter'),
+      // Aggregating directly over individual reviews (rather than averaging
+      // each offer's own avgRating) naturally weights offers with more
+      // reviews more heavily in the vendor-level rating.
+      this.reviewRepo.createQueryBuilder('r')
+        .innerJoin(Offer, 'o', 'o.id = r.offer_id')
+        .select(['COALESCE(AVG(r.rating),0) AS avg_rating', 'COUNT(*) AS review_count'])
+        .where('o.vendor_id = :vendorId', { vendorId })
+        .getRawOne(),
     ]);
-    return { ...vendor, followers_count: followersCount, offers };
+    return {
+      ...vendor, followers_count: followersCount, offers, verified_badge_tier: badgeTier,
+      rating: Math.round((+ratingRow?.avg_rating || 0) * 10) / 10,
+      review_count: +ratingRow?.review_count || 0,
+    };
   }
 
   async updateProfile(userId: number, dto: Record<string, any>) {
@@ -233,8 +294,14 @@ export class VendorService {
   }
 
   async follow(userId: number, vendorId: number) {
-    const v = await this.vendorRepo.findOne({ where: { id: vendorId }, select: ['id'] });
+    const v = await this.vendorRepo.findOne({ where: { id: vendorId }, select: ['id', 'user_id', 'business_name'] });
     if (!v) throw new NotFoundException('Vendor not found');
+
+    // Checked before the insert (which uses orIgnore) so a repeat follow —
+    // e.g. a UI retry — doesn't fire a duplicate notification for a no-op.
+    const alreadyFollowing = await this.followerRepo.findOne({
+      where: { user_id: userId, vendor_id: vendorId }, select: ['id'],
+    });
 
     await this.followerRepo
       .createQueryBuilder()
@@ -246,6 +313,17 @@ export class VendorService {
 
     const cnt = await this.followerRepo.count({ where: { vendor_id: vendorId } });
     await this.vendorRepo.update(vendorId, { total_followers: cnt });
+
+    // Every other engagement event (review, review reply, offer approval...)
+    // notifies the vendor — new followers were the one silent gap.
+    if (!alreadyFollowing && v.user_id && v.user_id !== userId) {
+      const follower = await this.userRepo.findOne({ where: { id: userId }, select: ['name'] });
+      await this.push.send(
+        v.user_id, 'New follower!', `${follower?.name ?? 'Someone'} started following ${v.business_name}.`,
+        { type: 'new_follower', route: '/vendor/dashboard' },
+      );
+    }
+
     return { following: true };
   }
 
@@ -256,7 +334,7 @@ export class VendorService {
     return { following: false };
   }
 
-  async getFollowers(vendorId: number, limit = 20) {
+  async getFollowers(vendorId: number, limit = 20, offset = 0) {
     const followers = await this.followerRepo
       .createQueryBuilder('vf')
       .innerJoin(User, 'u', 'u.id = vf.user_id')
@@ -264,6 +342,7 @@ export class VendorService {
       .where('vf.vendor_id = :vendorId', { vendorId })
       .orderBy('vf.created_at', 'DESC')
       .limit(limit)
+      .offset(offset)
       .getRawMany();
 
     const now = new Date();
@@ -283,10 +362,22 @@ export class VendorService {
   }
 
   async getFollowing(userId: number) {
+    // active_offers/total_followers were never selected here — both web and
+    // mobile's "Subscribed shops" card read these fields and, finding them
+    // always undefined, fell back to their own `?? 0`, showing "0 offers ·
+    // 0 followers" for every shop regardless of the real numbers.
     return this.followerRepo
       .createQueryBuilder('vf')
       .innerJoin(Vendor, 'v', 'v.id = vf.vendor_id')
-      .select(['v.id AS id', 'v.business_name AS business_name', 'v.logo_url AS logo_url', 'v.category AS category', 'v.city AS city', 'vf.created_at AS followed_at'])
+      .select([
+        'v.id AS id', 'v.business_name AS business_name', 'v.logo_url AS logo_url',
+        'v.category AS category', 'v.city AS city', 'vf.created_at AS followed_at',
+        // Cast to int: a bare COUNT(*) is bigint, which node-pg returns as a
+        // JS string — the mobile client casts this field `as num`, which
+        // would throw on a JSON string instead of a JSON number.
+        '(SELECT COUNT(*) FROM offers o WHERE o.vendor_id = v.id AND o.is_active = true)::int AS active_offers',
+        '(SELECT COUNT(*) FROM vendor_followers WHERE vendor_id = v.id)::int AS total_followers',
+      ])
       .where('vf.user_id = :userId', { userId })
       .orderBy('vf.created_at', 'DESC')
       .getRawMany();

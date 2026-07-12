@@ -22,6 +22,10 @@ export class SubscriptionPlan {
   @Column({ type: 'int', default: 30 })
   duration_days: number;
 
+  // Null = no annual option for this plan (e.g. the free Starter tier).
+  @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
+  annual_price: number | null;
+
   @Column({ type: 'int', nullable: true })
   max_offers: number | null;
 

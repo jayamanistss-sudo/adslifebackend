@@ -14,13 +14,14 @@ import { UserInteraction } from '../entities/user-interaction.entity';
 import { VendorApplication } from '../entities/vendor-application.entity';
 import { SubscriptionPlan } from '../entities/subscription-plan.entity';
 import { FraudFlag, FraudFlagStatus } from '../entities/fraud-flag.entity';
-import { Payment } from '../entities/payment.entity';
+import { Payment, PaymentStatus } from '../entities/payment.entity';
 import { AuthLog } from '../entities/auth-log.entity';
 import { Referral } from '../entities/referral.entity';
 import { Category } from '../entities/category.entity';
 import { clampLimit } from '../common/utils/pagination';
 import { NotificationSettingsService } from '../notification-settings/notification-settings.service';
 import { FraudDetectorService } from '../services/fraud-detector.service';
+import { CashfreeService } from '../cashfree/cashfree.service';
 
 @Injectable()
 export class AdminService {
@@ -45,6 +46,7 @@ export class AdminService {
     private readonly monitoring: MonitoringService,
     private readonly notificationSettings: NotificationSettingsService,
     private readonly fraudDetector: FraudDetectorService,
+    private readonly cashfree: CashfreeService,
   ) {}
 
   async getStats() {
@@ -213,10 +215,60 @@ export class AdminService {
     if (!app) throw new NotFoundException('Application not found');
 
     let vendorId: number | null = null;
+    // Applicants can pay for a plan during onboarding (order_id links the
+    // application to that Payment row), but plenty still apply for a paid
+    // plan without completing checkout — that's the normal case, not an
+    // error — captured here so the approval notification can nudge them
+    // toward finishing the upgrade instead of silently landing on Starter.
+    let unpaidPlanName: string | null = null;
     await this.dataSource.transaction(async (manager) => {
-      await manager.getRepository(VendorApplication).update(appId, { status });
+      await manager.getRepository(VendorApplication).update(appId, {
+        status, updated_at: new Date(),
+        // Rejection reason previously vanished after the one-time push/email —
+        // persist it so both the admin list and the applicant's own status
+        // check can show it later.
+        admin_note: note || null,
+      });
 
       if (status === 'approved') {
+        // Resolve the plan the applicant actually selected & paid for at
+        // signup. This used to be hardcoded to 'starter' unconditionally,
+        // silently downgrading anyone who paid for Growth/Pro during
+        // onboarding — the payment succeeds and is recorded, but the vendor
+        // row (created only here, on approval) never reflected it.
+        let planSlug = 'starter';
+        let planExpiresAt: Date | null = null;
+        if (app.plan_id) {
+          // Prefer the exact order_id this application was submitted with
+          // (reliable — one payment, no ambiguity) over the fuzzy
+          // user+plan match, which only ever checked reference_type
+          // 'vendor_plan' and missed 'vendor_plan_annual' entirely —
+          // annual payers were silently downgraded to Starter on approval.
+          // Fuzzy match kept only as a fallback for applications submitted
+          // before order_id existed on this table.
+          const paidPayment = app.order_id
+            ? await manager.getRepository(Payment).findOne({
+                where: { order_id: app.order_id, status: PaymentStatus.PAID },
+              })
+            : await manager.getRepository(Payment).findOne({
+                where: [
+                  { user_id: app.user_id, reference_type: 'vendor_plan', reference_id: app.plan_id, status: PaymentStatus.PAID },
+                  { user_id: app.user_id, reference_type: 'vendor_plan_annual', reference_id: app.plan_id, status: PaymentStatus.PAID },
+                ],
+                order: { created_at: 'DESC' },
+              });
+          const plan = await manager.getRepository(SubscriptionPlan).findOne({
+            where: { id: app.plan_id }, select: ['name', 'slug', 'duration_days'],
+          });
+          if (paidPayment && plan) {
+            const isAnnual = paidPayment.reference_type === 'vendor_plan_annual';
+            planSlug = plan.slug;
+            planExpiresAt = new Date(Date.now() + (isAnnual ? 365 : plan.duration_days) * 24 * 60 * 60 * 1000);
+          } else if (plan && plan.slug !== 'starter') {
+            unpaidPlanName = plan.name;
+          }
+        }
+
         const existing = await manager.getRepository(Vendor).findOne({ where: { user_id: app.user_id }, select: ['id'] });
         if (existing) {
           vendorId = existing.id;
@@ -229,6 +281,10 @@ export class AdminService {
               website: app.website, gst_number: app.gst_number, description: app.description,
               lat: app.lat ?? null, lng: app.lng ?? null,
               ...(app.logo_url ? { logo_url: app.logo_url } : {}),
+              // Only touch the plan if this application actually resolved a
+              // freshly-paid one — don't reset an existing vendor's current
+              // plan back to starter on a re-approval with no new payment.
+              ...(planExpiresAt ? { subscription_plan: planSlug, plan_expires_at: planExpiresAt } : {}),
             },
           );
         } else {
@@ -238,7 +294,9 @@ export class AdminService {
             gst_number: app.gst_number, description: app.description,
             logo_url: app.logo_url ?? null,
             lat: app.lat ?? null, lng: app.lng ?? null,
-            status: VendorStatus.APPROVED, review_note: note || null, subscription_plan: 'free',
+            status: VendorStatus.APPROVED, review_note: note || null,
+            subscription_plan: planSlug,
+            ...(planExpiresAt ? { plan_expires_at: planExpiresAt } : {}),
           });
           vendorId = saved.id;
         }
@@ -264,14 +322,41 @@ export class AdminService {
     const user = await this.userRepo.findOne({ where: { id: app.user_id }, select: ['id', 'name', 'email'] });
 
     if (status === 'approved' && heldForFraudReview) {
-      await this.push.send(app.user_id, 'Vendor Application Under Review', 'Your application needs a bit more review before going live. We\'ll notify you shortly.', { type: 'vendor_approved' });
+      await this.push.send(app.user_id, 'Vendor Application Under Review', 'Your application needs a bit more review before going live. We\'ll notify you shortly.', { type: 'vendor_approved', route: '/profile' });
     } else if (status === 'approved') {
-      await this.push.send(app.user_id, 'Vendor Approved!', 'Your vendor account has been approved. Start adding offers now!', { type: 'vendor_approved' });
+      const approvedBody = unpaidPlanName
+        ? `Your vendor account has been approved on Starter. Complete payment for ${unpaidPlanName} anytime to unlock it.`
+        : 'Your vendor account has been approved. Start adding offers now!';
+      await this.push.send(
+        app.user_id, 'Vendor Approved!', approvedBody,
+        { type: 'vendor_approved', route: unpaidPlanName ? '/vendor/select-plan' : '/vendor/dashboard' },
+      );
       if (user?.email && await this.notificationSettings.isEnabled('vendor_approved', 'email')) {
         await this.mail.sendVendorApprovedEmail(user.email, user.name, app.business_name);
       }
     } else {
-      await this.push.send(app.user_id, 'Vendor Application Update', note || 'Your vendor application was not approved this time.', { type: 'vendor_rejected' });
+      // A paid application that gets rejected used to just sit there —
+      // PAID and unrefunded — until an admin happened to notice and used
+      // the separate manual refund endpoint. Auto-refund via Cashfree here
+      // instead, using the same order_id link this application was
+      // submitted with.
+      let refunded = false;
+      if (app.order_id) {
+        const pay = await this.paymentRepo.findOne({ where: { order_id: app.order_id } });
+        if (pay && pay.status === PaymentStatus.PAID) {
+          try {
+            await this.cashfree.refund(pay.order_id, `refund_vendorapp_${app.id}_${Date.now()}`);
+            await this.paymentRepo.update(pay.id, { status: PaymentStatus.REFUNDED });
+            refunded = true;
+          } catch (e: any) {
+            this.logger.error(`Auto-refund failed for declined vendor application ${app.id}: ${e?.message ?? e}`);
+          }
+        }
+      }
+      const rejectBody = refunded
+        ? `${note || 'Your vendor application was not approved this time.'} Your payment has been refunded.`
+        : (note || 'Your vendor application was not approved this time.');
+      await this.push.send(app.user_id, 'Vendor Application Update', rejectBody, { type: 'vendor_rejected', route: '/profile' });
       if (user?.email && await this.notificationSettings.isEnabled('vendor_rejected', 'email')) {
         await this.mail.sendVendorRejectedEmail(user.email, user.name, app.business_name, note);
       }
@@ -349,7 +434,14 @@ export class AdminService {
   }
 
   async updateSiteSettings(dto: Record<string, any>, adminId?: number) {
-    const entries = Object.entries(dto).map(([key, value]) => ({ key, value: String(value) }));
+    // getSiteSettingsAll() masks secret fields as '••••••••' before sending
+    // them to the client — if that same placeholder round-trips back here
+    // (a form submitted without touching the secret field), it must never
+    // overwrite the real stored value with the mask itself.
+    const entries = Object.entries(dto)
+      .filter(([, value]) => value !== '••••••••')
+      .map(([key, value]) => ({ key, value: String(value) }));
+    if (!entries.length) return { updated: true };
     await this.siteSettingRepo.upsert(entries, ['key']);
     if (adminId) {
       setImmediate(() => this.monitoring.logActivity({
@@ -363,11 +455,19 @@ export class AdminService {
     return { updated: true };
   }
 
-  async getVendorRequests() {
+  async getVendorRequests(status = '', limit = 30, offset = 0) {
     // plan_id was previously dropped on submit and never joined here, so the
     // payment-status badge in VendorRequests.tsx rendered blank/stale on
     // every application (fixed: vendor-apply.controller.ts now persists it).
-    return this.appRepo
+    //
+    // Previously returned the entire table unconditionally — fine at
+    // current volume, but will degrade as applications accumulate. Counts
+    // are computed separately (whole-table GROUP BY, not the current page)
+    // so the tab badges stay accurate regardless of filter/pagination.
+    limit = clampLimit(limit, 30);
+    offset = Math.max(Number(offset) || 0, 0);
+
+    const qb = this.appRepo
       .createQueryBuilder('va')
       .innerJoin(User, 'u', 'u.id = va.user_id')
       .leftJoin(SubscriptionPlan, 'sp', 'sp.id = va.plan_id')
@@ -380,9 +480,22 @@ export class AdminService {
         `(SELECT p.paid_at FROM payments p
             WHERE p.user_id = va.user_id AND p.reference_type = 'vendor_plan' AND p.reference_id = va.plan_id
             ORDER BY p.created_at DESC LIMIT 1) AS paid_at`,
-      ])
-      .orderBy('va.created_at', 'DESC')
-      .getRawMany();
+      ]);
+    if (status) qb.andWhere('va.status = :status', { status });
+
+    const [apps, total, countRows] = await Promise.all([
+      qb.clone().orderBy('va.created_at', 'DESC').offset(offset).limit(limit).getRawMany(),
+      qb.clone().getCount(),
+      this.appRepo.createQueryBuilder('va').select(['va.status AS status', 'COUNT(*) AS count']).groupBy('va.status').getRawMany(),
+    ]);
+
+    const counts = { all: 0, pending: 0, approved: 0, rejected: 0 };
+    for (const r of countRows) {
+      counts.all += +r.count;
+      if (r.status in counts) (counts as any)[r.status] = +r.count;
+    }
+
+    return { apps, total, counts };
   }
 
   async updateUser(userId: number, action: string, extra: Record<string, any> = {}, adminId?: number) {
@@ -485,6 +598,23 @@ export class AdminService {
         break;
       default: throw new BadRequestException('Unknown action');
     }
+    // Outside the automated fraud-hold path, a vendor previously only found
+    // out an admin took their offer down when it silently vanished from
+    // their list.
+    if (action === 'deactivate' || action === 'delete') {
+      const offer = await this.offerRepo
+        .createQueryBuilder('o')
+        .innerJoin(Vendor, 'v', 'v.id = o.vendor_id')
+        .select(['o.title AS title', 'v.user_id AS "userId"'])
+        .where('o.id = :offerId', { offerId })
+        .getRawOne();
+      if (offer?.userId) {
+        await this.push.send(
+          offer.userId, 'Offer taken down', `Your offer "${offer.title}" was removed by an admin. Contact support if this seems wrong.`,
+          { type: 'offer_admin_removed', route: '/vendor/offers' },
+        );
+      }
+    }
     if (adminId) {
       setImmediate(() => this.monitoring.logActivity({
         userId: adminId, role: 'admin', action: `admin_offer_${action}`,
@@ -493,6 +623,67 @@ export class AdminService {
         metadata: extra,
       }).catch(() => {}));
     }
+    return { updated: true };
+  }
+
+  // is_featured was a flat boolean with no scheduling window, ordering, or
+  // dedicated management screen — just a star icon buried in the all-offers
+  // grid. This is the curation surface: list + schedule + manual order.
+  async getFeaturedOffers() {
+    return this.offerRepo
+      .createQueryBuilder('o')
+      .innerJoin(Vendor, 'v', 'v.id = o.vendor_id')
+      .where('o.is_featured = true')
+      .select(['o.*', 'v.business_name AS business_name'])
+      .orderBy('o.featured_order', 'ASC', 'NULLS LAST')
+      .addOrderBy('o.created_at', 'DESC')
+      .getRawMany();
+  }
+
+  async setFeatured(
+    offerId: number,
+    data: { featured: boolean; featured_start_at?: string | null; featured_until?: string | null },
+    adminId?: number,
+  ) {
+    const updateData: Record<string, any> = { is_featured: data.featured };
+    if (!data.featured) {
+      updateData.featured_start_at = null;
+      updateData.featured_until = null;
+      updateData.featured_order = null;
+    } else {
+      updateData.featured_start_at = data.featured_start_at ?? null;
+      updateData.featured_until = data.featured_until ?? null;
+      // New featured offers go to the end of the manually-ordered list.
+      const maxOrder = await this.offerRepo
+        .createQueryBuilder('o')
+        .select('MAX(o.featured_order)', 'max')
+        .where('o.is_featured = true')
+        .getRawOne();
+      updateData.featured_order = (maxOrder?.max ?? 0) + 1;
+    }
+    await this.offerRepo.update(offerId, updateData);
+    if (adminId) {
+      setImmediate(() => this.monitoring.logActivity({
+        userId: adminId, role: 'admin', action: data.featured ? 'admin_offer_feature' : 'admin_offer_unfeature',
+        entityType: 'offer', entityId: offerId,
+        description: `Admin ${data.featured ? 'featured' : 'unfeatured'} offer #${offerId}`,
+        metadata: data,
+      }).catch(() => {}));
+    }
+    return { updated: true };
+  }
+
+  async reorderFeatured(orderedIds: number[]) {
+    if (!orderedIds.length) return { updated: true };
+    // Was one UPDATE per item in a Promise.all loop — a single bulk
+    // statement instead, matched by position via UNNEST's ordinality
+    // (1-indexed, so subtract 1 to match the original 0-indexed order).
+    await this.dataSource.query(
+      `UPDATE offers SET featured_order = v.ord - 1
+       FROM (SELECT id, ord FROM UNNEST($1::int[]) WITH ORDINALITY AS t(id, ord)) AS v
+       WHERE offers.id = v.id`,
+      [orderedIds],
+    );
     return { updated: true };
   }
 
@@ -539,10 +730,10 @@ export class AdminService {
         case 'approve': await this.vendorRepo.update(vendorId, { status: VendorStatus.APPROVED }); break;
         case 'update_plan': {
           if (!extra.plan) throw new BadRequestException('Plan is required');
-          const dbPlan = extra.plan !== 'free'
+          const dbPlan = extra.plan !== 'starter'
             ? await this.planRepo.findOne({ where: { slug: extra.plan }, select: ['slug'] })
             : null;
-          if (!dbPlan && extra.plan !== 'free') throw new BadRequestException('Invalid plan');
+          if (!dbPlan && extra.plan !== 'starter') throw new BadRequestException('Invalid plan');
           await this.vendorRepo.update(vendorId, { subscription_plan: extra.plan });
           break;
         }
@@ -563,7 +754,7 @@ export class AdminService {
   }
 
   async bulkUpdateVendorPlan(vendorIds: number[], plan: string, adminId: number) {
-    if (plan !== 'free') {
+    if (plan !== 'starter') {
       const dbPlan = await this.planRepo.findOne({ where: { slug: plan, is_active: true }, select: ['slug'] });
       if (!dbPlan) throw new BadRequestException('Invalid or inactive plan');
     }

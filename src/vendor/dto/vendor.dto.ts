@@ -3,7 +3,7 @@ import {
   MaxLength, MinLength, Matches,
 } from 'class-validator';
 import { Type, Transform } from 'class-transformer';
-import { ApiPropertyOptional, ApiProperty } from '@nestjs/swagger';
+import { ApiPropertyOptional } from '@nestjs/swagger';
 
 export class UpdateVendorProfileDto {
   @ApiPropertyOptional({ example: 'My Bakery' })

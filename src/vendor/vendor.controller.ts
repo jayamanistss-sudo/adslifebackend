@@ -15,6 +15,8 @@ import { UpdateVendorProfileDto } from './dto/vendor.dto';
 import { Offer } from '../entities/offer.entity';
 import { OfferReview } from '../entities/offer-review.entity';
 import { RedemptionCode } from '../entities/redemption-code.entity';
+import { PlanFeaturesService } from '../plan-features/plan-features.service';
+import { PushService } from '../services/push.service';
 
 @ApiTags('vendor')
 @ApiBearerAuth()
@@ -26,6 +28,8 @@ export class VendorController {
     @InjectRepository(Offer) private readonly offerRepo: Repository<Offer>,
     @InjectRepository(OfferReview) private readonly reviewRepo: Repository<OfferReview>,
     @InjectRepository(RedemptionCode) private readonly redemptionRepo: Repository<RedemptionCode>,
+    private readonly planFeatures: PlanFeaturesService,
+    private readonly push: PushService,
   ) {}
 
   @Roles('vendor', 'admin')
@@ -81,13 +85,39 @@ export class VendorController {
     return { success: true, data };
   }
 
+  // Previously reachable by ANY authenticated user for ANY vendor id — no
+  // @Roles, no ownership check. Restricted to the vendor themselves (or
+  // admin) since gating this by the CALLING vendor's plan requires knowing
+  // whose plan to check in the first place.
+  @Roles('vendor', 'admin')
   @Get(':id/followers')
   async getFollowers(
+    @CurrentUser() user: any,
     @Param('id', ParseIntPipe) vendorId: number,
     @Query('limit') limit?: string,
+    @Query('page') page?: string,
   ) {
-    const data = await this.vendorService.getFollowers(vendorId, limit ? +limit : 20);
-    return { success: true, data };
+    if (user.role !== 'admin') {
+      const myVendorId = await this.vendorService.getMyVendorId(user.user_id);
+      if (myVendorId !== vendorId) return { success: false, error: 'Not your vendor profile' };
+    }
+    const take = limit ? +limit : 20;
+    const offset = page ? Math.max(+page - 1, 0) * take : 0;
+    const [subscriberCount, subscriberDetails] = await Promise.all([
+      this.planFeatures.vendorHasFeature(vendorId, 'subscriber_count'),
+      this.planFeatures.vendorHasFeature(vendorId, 'subscriber_details'),
+    ]);
+    const data = await this.vendorService.getFollowers(vendorId, take, offset);
+    return {
+      success: true,
+      data: {
+        ...data,
+        // The list itself is real PII (name/city/date) — hard-gated, not
+        // just blurred, unlike the count fields alongside it.
+        followers: subscriberDetails ? data.followers : [],
+        locked: { subscriber_count: !subscriberCount, subscriber_details: !subscriberDetails },
+      },
+    };
   }
 
   @Get('following')
@@ -115,6 +145,9 @@ export class VendorController {
   async myReviews(@CurrentUser() user: any, @Query('page') page = '1') {
     const vendor = await this.vendorService.getMyVendorId(user.user_id);
     if (!vendor) return { success: true, data: [] };
+    if (user.role !== 'admin' && !(await this.planFeatures.vendorHasFeature(vendor, 'review_access'))) {
+      return { success: false, error: "Reviews aren't included in your current plan. Upgrade to unlock it.", code: 'PLAN_FEATURE_LOCKED' };
+    }
     const offerIds = await this.offerRepo
       .find({ where: { vendor_id: vendor }, select: ['id', 'title'] });
     if (!offerIds.length) return { success: true, data: [] };
@@ -132,12 +165,18 @@ export class VendorController {
         'u.name AS "userName"', 'u.avatar_url AS "userAvatar"',
       ])
       .where('r.offer_id IN (:...ids)', { ids: idList })
+      .andWhere('r.hidden_by_admin = false')
+      // Only genuine written feedback — a bare star rating with no comment
+      // isn't feedback to read/reply to.
+      .andWhere("r.comment IS NOT NULL AND trim(r.comment) != ''")
       .orderBy('r.created_at', 'DESC')
       .offset(skip).limit(perPage)
       .getRawMany();
     const total = await this.reviewRepo
       .createQueryBuilder('r')
       .where('r.offer_id IN (:...ids)', { ids: idList })
+      .andWhere('r.hidden_by_admin = false')
+      .andWhere("r.comment IS NOT NULL AND trim(r.comment) != ''")
       .getCount();
     const data = reviews.map((r) => ({ ...r, offerTitle: titleMap.get(Number(r.offerId)) ?? '' }));
     return { success: true, data, total };
@@ -153,10 +192,13 @@ export class VendorController {
   ) {
     const vendorId = await this.vendorService.getMyVendorId(user.user_id);
     if (!vendorId) return { success: false, error: 'Vendor not found' };
+    if (user.role !== 'admin' && !(await this.planFeatures.vendorHasFeature(vendorId, 'review_access'))) {
+      return { success: false, error: "Reviews aren't included in your current plan. Upgrade to unlock it.", code: 'PLAN_FEATURE_LOCKED' };
+    }
     const review = await this.reviewRepo
       .createQueryBuilder('r')
       .innerJoin('offers', 'o', 'o.id = r.offer_id')
-      .select(['r.id AS id'])
+      .select(['r.id AS id', 'r.user_id AS "userId"', 'r.offer_id AS "offerId"', 'o.title AS "offerTitle"'])
       .where('r.id = :reviewId AND o.vendor_id = :vendorId', { reviewId, vendorId })
       .getRawOne();
     if (!review) return { success: false, error: 'Review not found' };
@@ -165,6 +207,14 @@ export class VendorController {
       vendor_reply: text.length ? text.slice(0, 1000) : null,
       replied_at: text.length ? new Date() : null,
     });
+    // The reviewer previously never found out their review got a reply
+    // unless they happened to revisit the offer page.
+    if (text.length) {
+      await this.push.send(
+        review.userId, 'You got a reply!', `The vendor replied to your review on "${review.offerTitle}".`,
+        { type: 'review_reply', route: `/offer/${review.offerId}`, offer_id: String(review.offerId) },
+      );
+    }
     return { success: true, data: { replied: true } };
   }
 
@@ -182,7 +232,7 @@ export class VendorController {
       .innerJoin('offers', 'o', 'o.id = rc.offer_id')
       .innerJoin('users', 'u', 'u.id = rc.user_id')
       .select(['rc.id AS id', 'rc.status AS status', 'rc.user_id AS user_id',
-               'rc.offer_id AS offer_id', 'o.vendor_id AS owner_vendor_id',
+               'rc.offer_id AS offer_id', 'rc.expires_at AS expires_at', 'o.vendor_id AS owner_vendor_id',
                'o.title AS offer_title', 'u.name AS user_name'])
       .where('rc.code = :clean', { clean })
       .getRawOne();
@@ -192,6 +242,11 @@ export class VendorController {
     }
     if (row.status === 'verified') {
       return { success: false, error: 'Code already used' };
+    }
+    // Previously no expiry existed at all — a code generated once was valid
+    // forever.
+    if (row.expires_at && new Date(row.expires_at) < new Date()) {
+      return { success: false, error: 'This code has expired — ask the customer to generate a new one' };
     }
 
     await this.redemptionRepo.update(row.id, {
@@ -224,6 +279,10 @@ export class VendorController {
   ) {
     if (!websiteUrl || !prompt) {
       return { success: false, error: 'website_url and prompt are required' };
+    }
+    const vendorId = await this.vendorService.getMyVendorId(user.user_id);
+    if (user.role !== 'admin' && (!vendorId || !(await this.planFeatures.vendorHasFeature(vendorId, 'ai_generation')))) {
+      return { success: false, error: 'AI offer generation isn\'t included in your current plan. Upgrade to Pro to unlock it.', code: 'PLAN_FEATURE_LOCKED' };
     }
     const data = await this.vendorService.aiGenerateOffer(user.user_id, websiteUrl, prompt);
     return { success: true, data };

@@ -1,4 +1,4 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn } from 'typeorm';
 
 @Entity('banner_ad_requests')
 export class BannerAdRequest {
@@ -45,11 +45,17 @@ export class BannerAdRequest {
   starts_at: Date | null;
 
   @Column({ type: 'varchar', length: 64, nullable: true })
-  razorpay_order_id: string | null;
+  order_id: string | null;
+
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  payment_session_id: string | null;
 
   @Column({ type: 'timestamp', nullable: true })
   paid_at: Date | null;
 
   @CreateDateColumn()
   created_at: Date;
+
+  @UpdateDateColumn()
+  updated_at: Date;
 }

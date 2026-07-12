@@ -32,7 +32,7 @@ export class AbTestController {
   @Post('create')
   async create(@CurrentUser() user: any, @Body() dto: CreateAbTestDto) {
     const vendorId = await this.resolveVendorId(user);
-    if (user.role !== 'admin' && !(await this.planFeatures.vendorHasFeature(vendorId, 'advanced_analytics'))) {
+    if (user.role !== 'admin' && !(await this.planFeatures.vendorHasFeature(vendorId, 'analytics_full'))) {
       throw new ForbiddenException("A/B testing isn't included in your current plan. Upgrade to unlock it.");
     }
     const data = await this.abTestService.create(vendorId, dto);

@@ -12,6 +12,30 @@ import { Category } from '../entities/category.entity';
 import { Offer } from '../entities/offer.entity';
 import { CreateCategoryDto, UpdateCategoryDto } from './dto/categories.dto';
 
+// Default set — lets an empty categories table (first setup, or after a
+// data reset) be repopulated with one admin-panel click instead of a manual
+// SQL insert.
+const DEFAULT_CATEGORIES: { name: string; slug: string; icon: string }[] = [
+  { name: 'Food & Dining', slug: 'food-and-dining', icon: 'utensils' },
+  { name: 'Fashion', slug: 'fashion', icon: 'shirt' },
+  { name: 'Electronics', slug: 'electronics', icon: 'smartphone' },
+  { name: 'Beauty', slug: 'beauty', icon: 'sparkles' },
+  { name: 'Travel', slug: 'travel', icon: 'plane' },
+  { name: 'Entertainment', slug: 'entertainment', icon: 'film' },
+  { name: 'Sports', slug: 'sports', icon: 'dumbbell' },
+  { name: 'General', slug: 'general', icon: 'tag' },
+  { name: 'Grocery', slug: 'grocery', icon: 'cart' },
+  { name: 'Health', slug: 'health', icon: 'pill' },
+  { name: 'IT Services', slug: 'it-services', icon: 'monitor' },
+  { name: 'Software', slug: 'software', icon: 'laptop' },
+  { name: 'Networking', slug: 'networking', icon: 'zap' },
+  { name: 'Hardware', slug: 'hardware', icon: 'wrench' },
+  { name: 'Cybersecurity', slug: 'cybersecurity', icon: 'headphones' },
+  { name: 'Cloud', slug: 'cloud', icon: 'globe' },
+  { name: 'Gaming', slug: 'gaming', icon: 'gamepad' },
+  { name: 'Web & Apps', slug: 'web-and-apps', icon: 'smartphone' },
+];
+
 @ApiTags('categories')
 @Controller('categories')
 export class CategoriesController {
@@ -59,6 +83,21 @@ export class CategoriesController {
       is_active: true,
     });
     return { success: true, data: { id: category.id } };
+  }
+
+  // Safe to call repeatedly — no-ops if any categories already exist, so
+  // this can't duplicate a live list, only repopulate an empty one.
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @ApiBearerAuth()
+  @Roles('admin')
+  @Post('seed')
+  async seed() {
+    const existing = await this.categoryRepo.count();
+    if (existing > 0) return { success: true, data: { inserted: 0, skipped: true } };
+    await this.categoryRepo.insert(
+      DEFAULT_CATEGORIES.map((c, i) => ({ ...c, sort_order: i, is_active: true })),
+    );
+    return { success: true, data: { inserted: DEFAULT_CATEGORIES.length } };
   }
 
   // Offers keep a free-text category slug with no FK; this is the only way

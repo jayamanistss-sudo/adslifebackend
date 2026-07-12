@@ -152,8 +152,8 @@ export class AdminVendorActionDto {
   action: string;
 
   @ApiPropertyOptional({
-    enum: ['free', 'starter', 'professional', 'enterprise'],
-    example: 'starter',
+    enum: ['starter', 'growth', 'pro'],
+    example: 'growth',
     description: 'Required when action = update_plan',
   })
   @IsOptional()
@@ -219,7 +219,8 @@ export class AdminOfferActionDto {
 }
 
 export class SiteSettingsDto {
-  @ApiPropertyOptional() @IsOptional() @IsString() app_name?: string;
+  // app_name was never read anywhere (redundant with site_name, which is);
+  // removed rather than left as a setting that silently does nothing.
   @ApiPropertyOptional() @IsOptional() @IsString() site_name?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() site_tagline?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() site_logo_url?: string;
@@ -228,10 +229,36 @@ export class SiteSettingsDto {
   @ApiPropertyOptional() @IsOptional() @IsString() seo_keywords?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() contact_email?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() contact_phone?: string;
-  @ApiPropertyOptional() @IsOptional() @IsString() min_app_version?: string;
+  // Previously "min_app_version" — didn't match the key the mobile app
+  // actually reads ("app_min_version"), and app_latest_version/
+  // app_download_url weren't in this DTO at all. The whitelist validator
+  // would have silently stripped all three from a naive admin-UI addition —
+  // the only way to set them was a direct DB write or the CI pipeline.
+  @ApiPropertyOptional() @IsOptional() @IsString() app_min_version?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() app_latest_version?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() app_download_url?: string;
   @ApiPropertyOptional({ enum: ['0', '1'] }) @IsOptional() @IsIn(['0', '1']) maintenance_mode?: string;
   @ApiPropertyOptional({ enum: ['0', '1'] }) @IsOptional() @IsIn(['0', '1']) coins_enabled?: string;
-  @ApiPropertyOptional({ enum: ['0', '1'] }) @IsOptional() @IsIn(['0', '1']) spin_enabled?: string;
+  // spin_enabled removed — no "spin" feature exists anywhere in the app to
+  // gate; this toggle had no code path reading it and nothing to control.
   @ApiPropertyOptional() @IsOptional() @IsString() terms_content?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() privacy_content?: string;
+  // Previously hardcoded literals in referral.service.ts — no admin lever
+  // to tune reward amounts without a code deploy.
+  @ApiPropertyOptional() @IsOptional() @IsString() referral_reward_referrer?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() referral_reward_referred?: string;
+
+  // SMTP — read live by MailService on every send (with .env fallback), so
+  // these can be rotated from the admin panel with no server restart.
+  @ApiPropertyOptional() @IsOptional() @IsString() smtp_host?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() smtp_port?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() smtp_user?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() smtp_password?: string;
+
+  // Cashfree — read live by CashfreeService on every call (with .env
+  // fallback), same rotate-without-restart behavior as SMTP above.
+  @ApiPropertyOptional() @IsOptional() @IsString() cashfree_app_id?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() cashfree_secret_key?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() cashfree_webhook_secret?: string;
+  @ApiPropertyOptional({ enum: ['sandbox', 'production'] }) @IsOptional() @IsIn(['sandbox', 'production']) cashfree_env?: string;
 }

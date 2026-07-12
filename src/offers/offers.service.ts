@@ -45,7 +45,7 @@ export class OffersService {
 
   private async assertUnderOfferLimit(vendorId: number): Promise<void> {
     const vendor = await this.vendorRepo.findOne({ where: { id: vendorId }, select: ['subscription_plan'] });
-    const plan = await this.planRepo.findOne({ where: { slug: vendor?.subscription_plan ?? 'free' }, select: ['max_offers', 'name'] });
+    const plan = await this.planRepo.findOne({ where: { slug: vendor?.subscription_plan ?? 'starter' }, select: ['max_offers', 'name'] });
     if (!plan || plan.max_offers === null) return; // no plan row or unlimited — nothing to enforce
 
     const activeCount = await this.offerRepo.count({ where: { vendor_id: vendorId, is_active: true } });
@@ -289,14 +289,26 @@ export class OffersService {
       // Signed-in users: dedupe against user_interactions (DB-backed, so it
       // survives restarts/redeploys and is correct across instances — unlike
       // the IP+in-memory fallback below, which resets on every deploy).
+      // An advisory lock serializes concurrent calls for this exact
+      // user+offer+view — a plain INSERT ... WHERE NOT EXISTS isn't enough
+      // by itself: under READ COMMITTED, two near-simultaneous requests can
+      // both evaluate "not exists" before either commits and both insert
+      // (verified with parallel requests during testing).
       const since = new Date(Date.now() - 3600000);
-      const recent = await this.userInteractionRepo
-        .createQueryBuilder('ui')
-        .where('ui.user_id = :userId AND ui.offer_id = :offerId AND ui.action = :action AND ui.created_at >= :since',
-          { userId, offerId, action: InteractionAction.VIEW, since })
-        .getCount();
-      if (recent > 0) return;
-      await this.userInteractionRepo.insert({ user_id: userId, offer_id: offerId, action: InteractionAction.VIEW });
+      const inserted = await this.userInteractionRepo.manager.transaction(async (em) => {
+        await em.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`ui:${userId}:${offerId}:view`]);
+        return em.query(
+          `INSERT INTO user_interactions (user_id, offer_id, action)
+           SELECT $1, $2, $3
+           WHERE NOT EXISTS (
+             SELECT 1 FROM user_interactions
+             WHERE user_id = $1 AND offer_id = $2 AND action = $3 AND created_at >= $4
+           )
+           RETURNING id`,
+          [userId, offerId, InteractionAction.VIEW, since],
+        );
+      });
+      if (inserted.length === 0) return;
       await this.offerRepo.increment({ id: offerId }, 'views', 1);
       return;
     }

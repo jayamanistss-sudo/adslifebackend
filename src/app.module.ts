@@ -2,7 +2,10 @@ import { Module, NestModule, MiddlewareConsumer } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD, APP_FILTER } from '@nestjs/core';
 import { ThrottlerModule } from '@nestjs/throttler';
+import { TypeOrmModule } from '@nestjs/typeorm';
 import { UserThrottlerGuard } from './common/guards/user-throttler.guard';
+import { MaintenanceGuard } from './common/guards/maintenance.guard';
+import { SiteSetting } from './entities/site-setting.entity';
 import { ScheduleModule } from '@nestjs/schedule';
 
 import configuration from './config/configuration';
@@ -20,7 +23,7 @@ import { VendorModule } from './vendor/vendor.module';
 import { AdminModule } from './admin/admin.module';
 import { AdminAnalyticsModule } from './admin-analytics/admin-analytics.module';
 import { PaymentModule } from './payment/payment.module';
-import { RazorpayModule } from './razorpay/razorpay.module';
+import { CashfreeModule } from './cashfree/cashfree.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { FraudModule } from './fraud/fraud.module';
@@ -50,6 +53,7 @@ import { PlanFeaturesModule } from './plan-features/plan-features.module';
     ThrottlerModule.forRoot([{ ttl: 60000, limit: 100 }]),
     ScheduleModule.forRoot(),
     DatabaseModule,
+    TypeOrmModule.forFeature([SiteSetting]),
 
     // MonitoringModule must be first so it's available globally
     MonitoringModule,
@@ -63,7 +67,7 @@ import { PlanFeaturesModule } from './plan-features/plan-features.module';
     AdminModule,
     AdminAnalyticsModule,
     PaymentModule,
-    RazorpayModule,
+    CashfreeModule,
     NotificationsModule,
     AnalyticsModule,
     FraudModule,
@@ -89,6 +93,7 @@ import { PlanFeaturesModule } from './plan-features/plan-features.module';
     { provide: APP_FILTER, useClass: HttpExceptionFilter },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
+    { provide: APP_GUARD, useClass: MaintenanceGuard },
     { provide: APP_GUARD, useClass: UserThrottlerGuard },
   ],
 })

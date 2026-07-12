@@ -65,7 +65,7 @@ export class Vendor {
   @Column({ type: 'text', nullable: true })
   review_note: string | null;
 
-  @Column({ type: 'varchar', length: 50, nullable: true, default: 'free' })
+  @Column({ type: 'varchar', length: 50, nullable: true, default: 'starter' })
   subscription_plan: string | null;
 
   @Column({ type: 'timestamp', nullable: true })

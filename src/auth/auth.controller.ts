@@ -1,6 +1,6 @@
 import {
   Controller, Post, Put, Body, Get, Query,
-  UseGuards, HttpCode, HttpStatus, Req, Res, BadRequestException,
+  UseGuards, HttpCode, HttpStatus, Req, Res,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { ApiTags, ApiBearerAuth, ApiBody } from '@nestjs/swagger';
@@ -9,6 +9,8 @@ import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { GoogleAuthDto, BecomeVendorDto } from './dto/google-auth.dto';
+import { UpdateProfileDto } from './dto/update-profile.dto';
+import { UpdateLocationDto } from './dto/update-location.dto';
 import { Public } from '../common/decorators/public.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -142,20 +144,11 @@ export class AuthController {
   @Put('location')
   async updateLocation(
     @CurrentUser() user: any,
-    @Body() dto: { lat: number; lng: number; city?: string; accuracy?: number; source?: string },
+    @Body() dto: UpdateLocationDto,
   ) {
-    if (dto.lat == null || dto.lng == null) {
-      throw new BadRequestException('lat and lng are required');
-    }
-    const lat = Number(dto.lat);
-    const lng = Number(dto.lng);
-    if (Number.isNaN(lat) || Number.isNaN(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
-      throw new BadRequestException('Invalid coordinates');
-    }
     const data = await this.authService.updateLocation(
-      user.user_id, lat, lng, dto.city,
-      dto.accuracy == null ? undefined : Number(dto.accuracy),
-      dto.source ?? 'gps',
+      user.user_id, dto.lat, dto.lng, dto.city,
+      dto.accuracy, dto.source ?? 'gps',
     );
     return { success: true, data };
   }
@@ -174,7 +167,7 @@ export class AuthController {
   @Put('profile')
   async updateProfile(
     @CurrentUser() user: any,
-    @Body() dto: { name?: string; phone?: string; city?: string; avatar_url?: string; email_alerts?: boolean },
+    @Body() dto: UpdateProfileDto,
   ) {
     const data = await this.authService.updateProfile(user.user_id, dto);
     return { success: true, data };

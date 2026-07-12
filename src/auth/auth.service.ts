@@ -28,7 +28,8 @@ import { PasswordReset } from '../entities/password-reset.entity';
 import { UserLocation } from '../entities/user-location.entity';
 import { EmailChangeRequest } from '../entities/email-change-request.entity';
 import { SubscriptionPlan } from '../entities/subscription-plan.entity';
-import { PASSWORD_MIN_LENGTH, PASSWORD_POLICY_MESSAGE } from '../common/constants/password-policy';
+import { SiteSetting } from '../entities/site-setting.entity';
+import { PASSWORD_MIN_LENGTH, PASSWORD_POLICY_MESSAGE, PASSWORD_COMPLEXITY_REGEX } from '../common/constants/password-policy';
 
 @Injectable()
 export class AuthService {
@@ -40,6 +41,7 @@ export class AuthService {
     @InjectRepository(UserLocation) private readonly userLocationRepo: Repository<UserLocation>,
     @InjectRepository(EmailChangeRequest) private readonly emailChangeRepo: Repository<EmailChangeRequest>,
     @InjectRepository(SubscriptionPlan) private readonly planRepo: Repository<SubscriptionPlan>,
+    @InjectRepository(SiteSetting) private readonly settingRepo: Repository<SiteSetting>,
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
@@ -226,7 +228,7 @@ export class AuthService {
       logo_url: dto.logo_url || null,
       lat: dto.lat ?? null,
       lng: dto.lng ?? null,
-      subscription_plan: planSlug ?? 'free',
+      subscription_plan: planSlug ?? 'starter',
       status: 'pending_review' as any,
     });
     await this.userRepo.update(userId, { role: 'vendor' as any });
@@ -257,7 +259,7 @@ export class AuthService {
   }
 
   async resetPassword(token: string, newPassword: string) {
-    if (!token || !newPassword || newPassword.length < PASSWORD_MIN_LENGTH) {
+    if (!token || !newPassword || newPassword.length < PASSWORD_MIN_LENGTH || !PASSWORD_COMPLEXITY_REGEX.test(newPassword)) {
       throw new BadRequestException(`Token and new password are required. ${PASSWORD_POLICY_MESSAGE}`);
     }
     const reset = await this.passwordResetRepo.findOne({
@@ -277,16 +279,24 @@ export class AuthService {
   }
 
   async getMe(userId: number) {
+    // Web's session-bootstrap check (App.tsx, on every page load now that
+    // the JWT itself isn't JS-readable) fully replaces its local user object
+    // with this response — it used to selectively merge, but the previous
+    // select list here was missing lat/lng/streak_count/login_count, which
+    // would have silently wiped those fields out of the UI on every load.
     const user = await this.userRepo.findOne({
       where: { id: userId },
-      select: ['id', 'name', 'email', 'phone', 'city', 'avatar_url', 'role', 'admin_role', 'email_alerts'],
+      select: [
+        'id', 'name', 'email', 'phone', 'city', 'avatar_url', 'role', 'admin_role',
+        'email_alerts', 'push_enabled', 'lat', 'lng', 'streak_count', 'login_count',
+      ],
     });
     if (!user) throw new NotFoundException('User not found');
     return user;
   }
 
-  async updateProfile(userId: number, dto: { name?: string; phone?: string; city?: string; avatar_url?: string; email_alerts?: boolean }) {
-    const allowed = ['name', 'phone', 'city', 'avatar_url', 'email_alerts'] as const;
+  async updateProfile(userId: number, dto: { name?: string; phone?: string; city?: string; avatar_url?: string; email_alerts?: boolean; push_enabled?: boolean }) {
+    const allowed = ['name', 'phone', 'city', 'avatar_url', 'email_alerts', 'push_enabled'] as const;
     const updateData: Partial<User> = {};
     for (const key of allowed) {
       if (dto[key] !== undefined) (updateData as any)[key] = dto[key];
@@ -295,7 +305,7 @@ export class AuthService {
     await this.userRepo.update(userId, updateData);
     const user = await this.userRepo.findOne({
       where: { id: userId },
-      select: ['id', 'name', 'email', 'phone', 'city', 'avatar_url', 'role', 'email_alerts'] as any,
+      select: ['id', 'name', 'email', 'phone', 'city', 'avatar_url', 'role', 'email_alerts', 'push_enabled'] as any,
     });
     if (!user) throw new NotFoundException('User not found');
     return user;
@@ -307,24 +317,32 @@ export class AuthService {
     const today = now.toISOString().slice(0, 10);
     const yesterday = new Date(now.getTime() - 86400000).toISOString().slice(0, 10);
 
+    // coins_enabled previously existed in site_settings and was accepted by
+    // the admin UI but read/enforced nowhere in the backend — a toggle that
+    // silently did nothing. Streak tracking still runs either way; only the
+    // coin payout is gated, so disabling coins doesn't break the check-in habit.
+    const coinsSetting = await this.settingRepo.findOne({ where: { key: 'coins_enabled' } });
+    const coinsEnabled = coinsSetting?.value !== '0';
+    const perDay = coinsEnabled ? 5 : 0;
+
     // Single atomic statement — the WHERE clause makes concurrent duplicate
     // check-ins a no-op instead of a double award.
     const rows = await this.userRepo.manager.query(
       `UPDATE users
           SET streak_count = CASE WHEN last_checkin = $2::date THEN streak_count + 1 ELSE 1 END,
-              coins = coins + LEAST(CASE WHEN last_checkin = $2::date THEN streak_count + 1 ELSE 1 END, 7) * 5,
+              coins = coins + LEAST(CASE WHEN last_checkin = $2::date THEN streak_count + 1 ELSE 1 END, 7) * $4,
               last_checkin = $1::date
         WHERE id = $3
           AND (last_checkin IS NULL OR last_checkin < $1::date)
         RETURNING streak_count, coins`,
-      [today, yesterday, userId],
+      [today, yesterday, userId, perDay],
     );
     const updated = rows?.[0]?.[0] ?? rows?.[0]; // driver returns [rows, count]
     if (updated?.streak_count !== undefined) {
       const streak = Number(updated.streak_count);
       return {
         streak,
-        coins_awarded: Math.min(streak, 7) * 5,
+        coins_awarded: Math.min(streak, 7) * perDay,
         total_coins: Number(updated.coins),
       };
     }
@@ -347,7 +365,7 @@ export class AuthService {
   }
 
   async changePassword(userId: number, currentPassword: string, newPassword: string) {
-    if (!newPassword || newPassword.length < PASSWORD_MIN_LENGTH) {
+    if (!newPassword || newPassword.length < PASSWORD_MIN_LENGTH || !PASSWORD_COMPLEXITY_REGEX.test(newPassword)) {
       throw new BadRequestException(PASSWORD_POLICY_MESSAGE);
     }
     const user = await this.userRepo.findOne({
@@ -396,7 +414,7 @@ export class AuthService {
 
     await this.emailChangeRepo.update(
       { user_id: userId, used_at: IsNull() as any },
-      { used_at: new Date() },
+      { used_at: new Date(), updated_at: new Date() },
     );
 
     const otp = String(crypto.randomInt(100000, 1000000));
@@ -421,7 +439,7 @@ export class AuthService {
 
     await this.dataSource.transaction(async (manager) => {
       await manager.getRepository(User).update(userId, { email: request.new_email });
-      await manager.getRepository(EmailChangeRequest).update(request.id, { used_at: new Date() });
+      await manager.getRepository(EmailChangeRequest).update(request.id, { used_at: new Date(), updated_at: new Date() });
     });
 
     const user = await this.userRepo.findOne({

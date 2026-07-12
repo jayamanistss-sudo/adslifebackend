@@ -14,6 +14,12 @@ export class CreateOrderDto {
   @IsString()
   @IsIn(['vendor_plan', 'boost', 'spotlight'])
   purpose?: string = 'vendor_plan';
+
+  @ApiPropertyOptional({ enum: ['monthly', 'annual'], default: 'monthly' })
+  @IsOptional()
+  @IsString()
+  @IsIn(['monthly', 'annual'])
+  billing_cycle?: 'monthly' | 'annual' = 'monthly';
 }
 
 export class VerifyPaymentQueryDto {

@@ -83,4 +83,18 @@ export class SubmitVendorApplicationDto {
   @Type(() => Number)
   @IsNumber()
   plan_id?: number;
+
+  @ApiPropertyOptional({ example: 'plan_7_42_1735689600000', description: 'Cashfree order_id if a paid plan was charged before submitting' })
+  @IsOptional()
+  @emptyToUndefined()
+  @IsString()
+  @MaxLength(100)
+  order_id?: string;
+
+  @ApiPropertyOptional({ example: 'ADS7K9XQP2', description: 'Referral code to redeem, if the user has one and never applied it at signup' })
+  @IsOptional()
+  @emptyToUndefined()
+  @IsString()
+  @MaxLength(20)
+  referral_code?: string;
 }

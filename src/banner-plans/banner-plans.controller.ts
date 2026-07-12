@@ -29,6 +29,15 @@ class UpdateBannerPlanDto {
   @IsOptional() @IsBoolean() is_active?: boolean;
 }
 
+// Default set — lets an empty banner_plans table (first setup, or after a
+// data reset) be repopulated with one admin-panel click instead of a manual
+// SQL insert. Matches the current live pricing.
+const DEFAULT_BANNER_PLANS = [
+  { name: 'Starter', duration_days: 7, price: 499, description: 'Great for short campaigns — 7 days on the home feed banner' },
+  { name: 'Growth', duration_days: 30, price: 1499, description: 'Most popular choice — a full month of banner visibility' },
+  { name: 'Pro', duration_days: 90, price: 3999, description: 'Maximum brand exposure — 3 months at the top of the feed' },
+];
+
 @ApiTags('banner-plans')
 @Controller('banner-plans')
 export class BannerPlansController {
@@ -69,6 +78,19 @@ export class BannerPlansController {
       is_active: true,
     });
     return { success: true, data: plan };
+  }
+
+  // Safe to call repeatedly — no-ops if any banner plans already exist, so
+  // this can't duplicate or overwrite live pricing, only repopulate an empty table.
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @ApiBearerAuth()
+  @Roles('admin')
+  @Post('seed')
+  async seed() {
+    const existing = await this.repo.count();
+    if (existing > 0) return { success: true, data: { inserted: 0, skipped: true } };
+    await this.repo.insert(DEFAULT_BANNER_PLANS.map((p) => ({ ...p, position: 'top', is_active: true })));
+    return { success: true, data: { inserted: DEFAULT_BANNER_PLANS.length } };
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)

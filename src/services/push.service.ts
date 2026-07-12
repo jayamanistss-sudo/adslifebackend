@@ -6,6 +6,7 @@ import * as path from 'node:path';
 import * as crypto from 'node:crypto';
 import axios from 'axios';
 import { UserFcmToken } from '../entities/user-fcm-token.entity';
+import { User } from '../entities/user.entity';
 import { Notification } from '../entities/notification.entity';
 import { NotificationOutbox, NotificationOutboxStatus } from '../entities/notification-outbox.entity';
 import { NotificationSettingsService } from '../notification-settings/notification-settings.service';
@@ -24,6 +25,7 @@ export class PushService {
 
   constructor(
     @InjectRepository(UserFcmToken) private readonly userFcmTokenRepo: Repository<UserFcmToken>,
+    @InjectRepository(User) private readonly userRepo: Repository<User>,
     @InjectRepository(Notification) private readonly notifRepo: Repository<Notification>,
     @InjectRepository(NotificationOutbox) private readonly outboxRepo: Repository<NotificationOutbox>,
     private readonly settings: NotificationSettingsService,
@@ -117,10 +119,21 @@ export class PushService {
 
     if (!pushOn) return 0;
 
-    const result = await this.pushOnly(ids, title, body, data);
+    // Per-user opt-out (mobile/web Settings "Push Notifications" toggle).
+    // Only the FCM leg is gated — the in-app row/socket event above already
+    // went out regardless, matching how the admin-level pushOn/inAppOn
+    // toggles are already independent of each other.
+    const optedIn = await this.userRepo.find({
+      where: { id: In(ids), push_enabled: true },
+      select: ['id'],
+    });
+    const optedInIds = optedIn.map((u) => u.id);
+    if (!optedInIds.length) return 0;
+
+    const result = await this.pushOnly(optedInIds, title, body, data);
 
     if (result.shouldRetry) {
-      await this.enqueueOutbox(ids, title, body, data, createdBy, result.error);
+      await this.enqueueOutbox(optedInIds, title, body, data, createdBy, result.error);
     }
 
     return result.sent;

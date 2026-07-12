@@ -3,10 +3,13 @@ import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { NotificationsService } from './notifications.service';
 import { NotificationTemplateService } from './notification-template.service';
 import { GeminiTemplateService } from './gemini-template.service';
+import { PromoScheduleConfigService } from './promo-schedule-config.service';
+import { PromoNotificationService } from './promo-notification.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { MonitoringService } from '../monitoring/monitoring.service';
 import {
   SaveTokenDto, MarkReadDto, NotificationsListQueryDto, TriggerNotificationDto,
   CreateTemplateDto, UpdateTemplateDto,
@@ -21,6 +24,9 @@ export class NotificationsController {
     private readonly notificationsService: NotificationsService,
     private readonly templateService: NotificationTemplateService,
     private readonly geminiService: GeminiTemplateService,
+    private readonly scheduleConfig: PromoScheduleConfigService,
+    private readonly promoService: PromoNotificationService,
+    private readonly monitoring: MonitoringService,
   ) {}
 
   @Get()
@@ -135,5 +141,46 @@ export class NotificationsController {
   async seedTemplates() {
     const inserted = await this.templateService.seedFromDefaults();
     return { success: true, data: { inserted } };
+  }
+
+  // ── Admin campaign schedule ─────────────────────────────────────────────
+  // Send times were static @Cron literals — no admin lever to retune
+  // without a code deploy.
+
+  @UseGuards(RolesGuard)
+  @Roles('admin')
+  @Get('schedule')
+  async getSchedule() {
+    const data = await this.scheduleConfig.getSchedule();
+    return { success: true, data };
+  }
+
+  @UseGuards(RolesGuard)
+  @Roles('super')
+  @Put('schedule')
+  async updateSchedule(@CurrentUser() admin: any, @Body() patch: Record<string, string>) {
+    const data = await this.scheduleConfig.setSchedule(patch);
+    await this.promoService.reloadSchedule();
+    setImmediate(() => this.monitoring.logActivity({
+      userId: admin.user_id, role: 'admin', action: 'admin_promo_schedule_update',
+      entityType: 'site_settings', entityId: 0,
+      description: `Admin updated campaign notification schedule: ${Object.keys(patch).join(', ')}`,
+      metadata: patch,
+    }).catch(() => {}));
+    return { success: true, data, message: 'Campaign schedule updated' };
+  }
+
+  @UseGuards(RolesGuard)
+  @Roles('super')
+  @Put('schedule/reset')
+  async resetSchedule(@CurrentUser() admin: any) {
+    const data = await this.scheduleConfig.resetToDefaults();
+    await this.promoService.reloadSchedule();
+    setImmediate(() => this.monitoring.logActivity({
+      userId: admin.user_id, role: 'admin', action: 'admin_promo_schedule_reset',
+      entityType: 'site_settings', entityId: 0,
+      description: 'Admin reset campaign notification schedule to defaults',
+    }).catch(() => {}));
+    return { success: true, data, message: 'Campaign schedule reset to defaults' };
   }
 }

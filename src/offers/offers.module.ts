@@ -21,10 +21,11 @@ import { FraudFlag } from '../entities/fraud-flag.entity';
 import { NotificationOutbox } from '../entities/notification-outbox.entity';
 import { SubscriptionPlan } from '../entities/subscription-plan.entity';
 import { UserInteraction } from '../entities/user-interaction.entity';
+import { Category } from '../entities/category.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Offer, Vendor, VendorFollower, User, UserFcmToken, Notification, OfferReview, OfferReport, FraudFlag, NotificationOutbox, SubscriptionPlan, RedemptionCode, UserInteraction]),
+    TypeOrmModule.forFeature([Offer, Vendor, VendorFollower, User, UserFcmToken, Notification, OfferReview, OfferReport, FraudFlag, NotificationOutbox, SubscriptionPlan, RedemptionCode, UserInteraction, Category]),
     GatewayModule,
     MailModule,
     FraudModule,

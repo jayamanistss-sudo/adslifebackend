@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { NotificationsController } from './notifications.controller';
 import { NotificationsService } from './notifications.service';
 import { PromoNotificationService } from './promo-notification.service';
+import { PromoScheduleConfigService } from './promo-schedule-config.service';
 import { PersonalizedNotificationService } from './personalized-notification.service';
 import { NotificationTemplateService } from './notification-template.service';
 import { NotificationCapService } from './notification-cap.service';
@@ -11,6 +12,9 @@ import { PushOutboxService } from './push-outbox.service';
 import { InterestNotificationService } from './interest-notification.service';
 import { ExpiryReminderService } from './expiry-reminder.service';
 import { VendorDigestService } from './vendor-digest.service';
+import { VendorMailDigestService } from './vendor-mail-digest.service';
+import { VendorMonthlyReportService } from './vendor-monthly-report.service';
+import { MailModule } from '../mail/mail.module';
 import { PushService } from '../services/push.service';
 import { Notification } from '../entities/notification.entity';
 import { UserFcmToken } from '../entities/user-fcm-token.entity';
@@ -18,17 +22,19 @@ import { User } from '../entities/user.entity';
 import { UserInteraction } from '../entities/user-interaction.entity';
 import { NotificationTemplate } from '../entities/notification-template.entity';
 import { NotificationOutbox } from '../entities/notification-outbox.entity';
+import { SiteSetting } from '../entities/site-setting.entity';
 
 @Module({
   imports: [TypeOrmModule.forFeature([
-    Notification, UserFcmToken, User, UserInteraction, NotificationTemplate, NotificationOutbox,
-  ])],
+    Notification, UserFcmToken, User, UserInteraction, NotificationTemplate, NotificationOutbox, SiteSetting,
+  ]), MailModule],
   controllers: [NotificationsController],
   providers: [
     NotificationsService,
     PushService,
     PushOutboxService,
     PromoNotificationService,
+    PromoScheduleConfigService,
     PersonalizedNotificationService,
     NotificationTemplateService,
     NotificationCapService,
@@ -36,7 +42,9 @@ import { NotificationOutbox } from '../entities/notification-outbox.entity';
     InterestNotificationService,
     ExpiryReminderService,
     VendorDigestService,
+    VendorMailDigestService,
+    VendorMonthlyReportService,
   ],
-  exports: [PushService, NotificationTemplateService],
+  exports: [PushService, NotificationTemplateService, PromoScheduleConfigService, PromoNotificationService],
 })
 export class NotificationsModule {}

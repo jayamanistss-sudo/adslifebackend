@@ -15,6 +15,7 @@ import { PasswordReset } from '../entities/password-reset.entity';
 import { UserLocation } from '../entities/user-location.entity';
 import { EmailChangeRequest } from '../entities/email-change-request.entity';
 import { SubscriptionPlan } from '../entities/subscription-plan.entity';
+import { SiteSetting } from '../entities/site-setting.entity';
 
 @Module({
   imports: [
@@ -29,7 +30,7 @@ import { SubscriptionPlan } from '../entities/subscription-plan.entity';
         },
       }),
     }),
-    TypeOrmModule.forFeature([User, Vendor, UserPreference, PasswordReset, UserLocation, EmailChangeRequest, SubscriptionPlan]),
+    TypeOrmModule.forFeature([User, Vendor, UserPreference, PasswordReset, UserLocation, EmailChangeRequest, SubscriptionPlan, SiteSetting]),
     ReferralModule,
     MailModule,
   ],

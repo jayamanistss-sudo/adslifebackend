@@ -30,4 +30,9 @@ export class RedemptionCode {
 
   @Column({ type: 'int', nullable: true })
   verified_by: number | null;
+
+  // Previously no expiry mechanism existed at all — a code generated once
+  // was valid forever, an unusual and risky gap for a discount-code system.
+  @Column({ type: 'timestamp', nullable: true })
+  expires_at: Date | null;
 }

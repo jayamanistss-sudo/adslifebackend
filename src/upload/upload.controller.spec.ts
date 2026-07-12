@@ -1,5 +1,3 @@
-import { BadRequestException } from '@nestjs/common';
-
 // Inline the magic-byte detector here so we can unit-test it independently
 // of the full NestJS boot cycle.
 function detectMime(buf: Buffer): string | null {

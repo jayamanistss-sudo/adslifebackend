@@ -1,5 +1,5 @@
 import {
-  Controller, Get, Post, Put, Delete, Body, Param, Query,
+  Controller, Get, Post, Put, Body, Param, Query,
   ParseIntPipe, UseGuards,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiBody } from '@nestjs/swagger';
@@ -8,6 +8,7 @@ import { AdminService } from './admin.service';
 import { NotificationSettingsService } from '../notification-settings/notification-settings.service';
 import { OfferReviewsService } from '../offers/offer-reviews.service';
 import { MonitoringService } from '../monitoring/monitoring.service';
+import { FeedConfigService } from '../feed/feed-config.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -31,6 +32,7 @@ export class AdminController {
     private readonly notificationSettings: NotificationSettingsService,
     private readonly offerReviews: OfferReviewsService,
     private readonly monitoring: MonitoringService,
+    private readonly feedConfig: FeedConfigService,
   ) {}
 
   @Get('notification-settings')
@@ -124,11 +126,19 @@ export class AdminController {
     return { success: true, data: safe };
   }
 
+  // Was reachable by any plain 'admin' (class-level guard) and echoed the
+  // live Cashfree secret key / webhook secret / SMTP password back in
+  // plaintext — those are write-only from here on: the UI can see that a
+  // secret is configured, never the value itself.
+  @Roles('super')
   @Get('site-settings/all')
   async getSiteSettingsAll() {
-    // Admin-only (class-level guards apply): full list incl. payment config
     const data = await this.adminService.getSiteSettings();
-    return { success: true, data };
+    const masked: Record<string, any> = {};
+    for (const [k, v] of Object.entries(data)) {
+      masked[k] = /secret|password|webhook/i.test(k) && v ? '••••••••' : v;
+    }
+    return { success: true, data: masked };
   }
 
   @Put('site-settings')
@@ -138,8 +148,13 @@ export class AdminController {
   }
 
   @Get('vendor-requests')
-  async vendorRequests() {
-    const data = await this.adminService.getVendorRequests();
+  async vendorRequests(
+    @Query('status') status = '',
+    @Query('page') page = '1',
+    @Query('limit') limit = '30',
+  ) {
+    const offset = (Math.max(Number(page) || 1, 1) - 1) * (Number(limit) || 30);
+    const data = await this.adminService.getVendorRequests(status, Number(limit) || 30, offset);
     return { success: true, data };
   }
 
@@ -205,6 +220,30 @@ export class AdminController {
     return { success: true, data, message: 'Offer updated' };
   }
 
+  // is_featured was a flat boolean with no dedicated management screen at
+  // all — just a star icon buried in the all-offers grid.
+  @Get('offers/featured')
+  async featuredOffers() {
+    const data = await this.adminService.getFeaturedOffers();
+    return { success: true, data };
+  }
+
+  @Put('offers/:id/featured')
+  async setFeatured(
+    @CurrentUser() admin: any,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { featured: boolean; featured_start_at?: string; featured_until?: string },
+  ) {
+    const data = await this.adminService.setFeatured(id, body, admin.user_id);
+    return { success: true, data, message: body.featured ? 'Offer featured' : 'Offer unfeatured' };
+  }
+
+  @Put('offers/featured/reorder')
+  async reorderFeatured(@Body('ordered_ids') orderedIds: number[]) {
+    const data = await this.adminService.reorderFeatured(orderedIds);
+    return { success: true, data };
+  }
+
   @Put('vendors/bulk-plan')
   @ApiBody({ type: BulkVendorPlanDto })
   async bulkVendorPlan(@CurrentUser() admin: any, @Body() dto: BulkVendorPlanDto) {
@@ -256,5 +295,40 @@ export class AdminController {
       entityType: 'review', entityId: id, description: `Admin restored review #${id}`,
     }).catch(() => {}));
     return { success: true, data, message: 'Review restored' };
+  }
+
+  // Every one of the ~15 feed-ranking weights was a hardcoded constant —
+  // zero admin tuning surface for the single algorithm that determines what
+  // every user sees first. Read is available to any admin; changing it is
+  // gated to super-admins given the blast radius.
+  @Get('feed-config')
+  async getFeedConfig() {
+    const data = await this.feedConfig.getWeights();
+    return { success: true, data };
+  }
+
+  @Put('feed-config')
+  @Roles('super')
+  async updateFeedConfig(@CurrentUser() admin: any, @Body() patch: Record<string, number>) {
+    const data = await this.feedConfig.setWeights(patch);
+    setImmediate(() => this.monitoring.logActivity({
+      userId: admin.user_id, role: 'admin', action: 'admin_feed_config_update',
+      entityType: 'site_settings', entityId: 0,
+      description: `Admin updated feed ranking weights: ${Object.keys(patch).join(', ')}`,
+      metadata: patch,
+    }).catch(() => {}));
+    return { success: true, data, message: 'Feed weights updated' };
+  }
+
+  @Put('feed-config/reset')
+  @Roles('super')
+  async resetFeedConfig(@CurrentUser() admin: any) {
+    const data = await this.feedConfig.resetToDefaults();
+    setImmediate(() => this.monitoring.logActivity({
+      userId: admin.user_id, role: 'admin', action: 'admin_feed_config_reset',
+      entityType: 'site_settings', entityId: 0,
+      description: 'Admin reset feed ranking weights to defaults',
+    }).catch(() => {}));
+    return { success: true, data, message: 'Feed weights reset to defaults' };
   }
 }

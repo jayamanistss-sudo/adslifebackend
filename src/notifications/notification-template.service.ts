@@ -66,10 +66,13 @@ export class NotificationTemplateService {
     return candidates[Math.floor(Math.random() * candidates.length)];
   }
 
+  // Previously inserted with is_active defaulting to true — an unreviewed
+  // model output shipped to real users the same night it was generated.
+  // Now these sit inactive until an admin approves them in the templates UI.
   async insertGenerated(items: SeedTemplate[]): Promise<number> {
     if (!items.length) return 0;
     await this.templateRepo.insert(
-      items.map((i) => ({ ...i, is_ai_generated: true })),
+      items.map((i) => ({ ...i, is_ai_generated: true, is_active: false })),
     );
     return items.length;
   }

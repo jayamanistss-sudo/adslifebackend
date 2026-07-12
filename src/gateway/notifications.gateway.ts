@@ -7,6 +7,7 @@ import {
 import { Server, Socket } from 'socket.io';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
+import { parse as parseCookie } from 'cookie';
 
 @WebSocketGateway({
   cors: {
@@ -28,7 +29,16 @@ export class NotificationsGateway implements OnGatewayConnection, OnGatewayDisco
 
   async handleConnection(client: Socket) {
     try {
+      // Web no longer keeps a JS-readable copy of the token (removed from
+      // localStorage to close an XSS attack surface — the httpOnly cookie
+      // already authenticates every REST call on its own) — this mirrors
+      // jwt.strategy.ts's same cookie-then-header fallback order so the
+      // socket connection keeps working without it. Mobile still has no
+      // cookie jar for this client, so its auth.token path is untouched.
+      const cookieHeader = client.handshake.headers?.cookie;
+      const cookieToken = cookieHeader ? parseCookie(cookieHeader).adslife_token : undefined;
       const token =
+        cookieToken ||
         (client.handshake.auth?.token as string) ||
         (client.handshake.headers?.authorization as string)?.replace('Bearer ', '');
 

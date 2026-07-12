@@ -5,7 +5,7 @@ import { LessThan, Repository } from 'typeorm';
 import { Vendor } from '../entities/vendor.entity';
 import { PushService } from '../services/push.service';
 
-const FREE_PLAN_SLUG = 'free';
+const FREE_PLAN_SLUG = 'starter';
 
 @Injectable()
 export class PlanExpiryService {
@@ -30,7 +30,7 @@ export class PlanExpiryService {
     const toDowngrade = expired.filter((v) => v.subscription_plan !== FREE_PLAN_SLUG);
     if (!toDowngrade.length) return;
 
-    this.logger.log(`Downgrading ${toDowngrade.length} expired vendor plan(s) to free`);
+    this.logger.log(`Downgrading ${toDowngrade.length} expired vendor plan(s) to starter`);
 
     for (const vendor of toDowngrade) {
       await this.vendorRepo.update(vendor.id, {
@@ -40,7 +40,7 @@ export class PlanExpiryService {
       await this.push.send(
         vendor.user_id,
         'Your plan has expired',
-        `${vendor.business_name}'s subscription has ended and moved to the Free plan. Renew anytime to restore your benefits.`,
+        `${vendor.business_name}'s subscription has ended and moved to the Starter plan. Renew anytime to restore your benefits.`,
         { type: 'plan_expired' },
       );
     }

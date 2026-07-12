@@ -8,6 +8,31 @@ on:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: adslife_ci
+          POSTGRES_PASSWORD: adslife_ci
+          POSTGRES_DB: adslife_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DB_HOST: localhost
+      DB_PORT: 5432
+      DB_NAME: adslife_ci
+      DB_USER: adslife_ci
+      DB_PASS: adslife_ci
+      JWT_SECRET: ci_test_secret_not_for_production
+      APP_ENV: test
+
     steps:
       - uses: actions/checkout@v4
 
@@ -19,12 +44,19 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # NOTE: `npm run lint` is not wired up in this repo yet — eslint isn't
-      # a dependency and no config file exists, so it fails on every commit,
-      # not just this one. Left out of the gate until that's set up.
+      - name: Lint
+        run: npm run lint
 
       - name: Build
         run: npm run build
 
+      - name: Load CI schema fixture
+        run: |
+          PGPASSWORD=adslife_ci psql -h localhost -U adslife_ci -d adslife_ci -f test/fixtures/ci-schema.sql
+          PGPASSWORD=adslife_ci psql -h localhost -U adslife_ci -d adslife_ci -f test/fixtures/ci-seed.sql
+
       - name: Unit tests
         run: npm test -- --ci
+
+      - name: E2E tests
+        run: npm run test:e2e -- --ci

@@ -32,6 +32,14 @@ export class CreatePlanDto {
   @Min(1)
   duration_days?: number = 30;
 
+  // Omitted/null = no annual option for this plan (e.g. a free tier).
+  @ApiPropertyOptional({ example: 1990 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  annual_price?: number;
+
   @ApiPropertyOptional({ example: 10, default: 10 })
   @IsOptional()
   @Type(() => Number)
@@ -78,6 +86,13 @@ export class UpdatePlanDto {
   @IsInt()
   @Min(1)
   duration_days?: number;
+
+  @ApiPropertyOptional({ example: 1990 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  annual_price?: number;
 
   @ApiPropertyOptional()
   @IsOptional()

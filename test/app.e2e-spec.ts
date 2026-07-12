@@ -131,7 +131,7 @@ describe('AdsLife API (e2e)', () => {
     let maxOffers: number;
 
     beforeAll(async () => {
-      // Fast-track this disposable user straight to an approved 'free'-plan
+      // Fast-track this disposable user straight to an approved 'starter'-plan
       // vendor via direct DB writes — exercising the full apply→approve
       // flow isn't the point of this test, only the offer-limit enforcement.
       const userRow = await dataSource.query('SELECT id FROM users WHERE email = $1', [testEmail]);
@@ -139,12 +139,12 @@ describe('AdsLife API (e2e)', () => {
       await dataSource.query("UPDATE users SET role = 'vendor' WHERE id = $1", [userId]);
       const vendorRow = await dataSource.query(
         `INSERT INTO vendors (user_id, business_name, status, subscription_plan)
-         VALUES ($1, 'E2E Limit Shop', 'approved', 'free') RETURNING id`,
+         VALUES ($1, 'E2E Limit Shop', 'approved', 'starter') RETURNING id`,
         [userId],
       );
       vendorId = vendorRow[0].id;
 
-      const plan = await dataSource.query("SELECT max_offers FROM subscription_plans WHERE slug = 'free'");
+      const plan = await dataSource.query("SELECT max_offers FROM subscription_plans WHERE slug = 'starter'");
       maxOffers = plan[0].max_offers;
 
       // Fresh login so the JWT's role claim reflects the 'vendor' role just set.

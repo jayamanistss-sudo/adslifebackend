@@ -1,5 +1,6 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { Cron } from '@nestjs/schedule';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { SchedulerRegistry } from '@nestjs/schedule';
+import { CronJob } from 'cron';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { PushService } from '../services/push.service';
@@ -8,18 +9,71 @@ import { UserFcmToken } from '../entities/user-fcm-token.entity';
 import { NotificationTemplateService } from './notification-template.service';
 import { NotificationCapService } from './notification-cap.service';
 import { isPrimaryInstance } from '../common/utils/cron-guard';
+import { PromoScheduleConfigService, PromoSchedule } from './promo-schedule-config.service';
+
+// Send times were static @Cron decorators — no admin lever to retune
+// without a code deploy, and no way to change them without a restart.
+// Registered dynamically via SchedulerRegistry instead, sourced from
+// PromoScheduleConfigService, so an admin edit takes effect immediately.
+const JOB_NAMES: Record<keyof PromoSchedule, string> = {
+  morning: 'morning_notif',
+  lunch: 'lunch_notif',
+  evening: 'evening_notif',
+  dinner: 'dinner_notif',
+  goodnight: 'goodnight_notif',
+  weekend: 'weekend_notif',
+  reengage: 'reengage_notif',
+};
 
 @Injectable()
-export class PromoNotificationService {
+export class PromoNotificationService implements OnModuleInit {
   private readonly logger = new Logger(PromoNotificationService.name);
 
   constructor(
     private readonly pushService: PushService,
     private readonly templateService: NotificationTemplateService,
     private readonly capService: NotificationCapService,
+    private readonly scheduleConfig: PromoScheduleConfigService,
+    private readonly schedulerRegistry: SchedulerRegistry,
     @InjectRepository(User) private readonly userRepo: Repository<User>,
     @InjectRepository(UserFcmToken) private readonly tokenRepo: Repository<UserFcmToken>,
   ) {}
+
+  async onModuleInit() {
+    await this.reloadSchedule();
+  }
+
+  private handlerFor(key: keyof PromoSchedule): () => Promise<void> {
+    const handlers: Record<keyof PromoSchedule, () => Promise<void>> = {
+      morning: () => this.sendMorningNotification(),
+      lunch: () => this.sendLunchNotification(),
+      evening: () => this.sendEveningNotification(),
+      dinner: () => this.sendDinnerNotification(),
+      goodnight: () => this.sendGoodNightNotification(),
+      weekend: () => this.sendWeekendNotification(),
+      reengage: () => this.sendReengagementNotification(),
+    };
+    return handlers[key];
+  }
+
+  /** Re-registers one job with a fresh cron time. */
+  private registerJob(key: keyof PromoSchedule, cronTime: string) {
+    const name = JOB_NAMES[key];
+    const handler = this.handlerFor(key);
+    if (this.schedulerRegistry.doesExist('cron', name)) {
+      this.schedulerRegistry.deleteCronJob(name);
+    }
+    const job = new CronJob(cronTime, () => { handler().catch((e) => this.logger.error(`${name} failed`, e)); }, null, true, 'Asia/Kolkata');
+    this.schedulerRegistry.addCronJob(name, job as any);
+  }
+
+  /** Re-reads config and re-registers all jobs — called at boot and after an admin schedule update. */
+  async reloadSchedule() {
+    const schedule = await this.scheduleConfig.getSchedule();
+    for (const key of Object.keys(JOB_NAMES) as (keyof PromoSchedule)[]) {
+      this.registerJob(key, schedule[key]);
+    }
+  }
 
   // ── Helpers ────────────────────────────────────────────────
 
@@ -55,53 +109,43 @@ export class PromoNotificationService {
   }
 
   // ── Cron Jobs ─────────────────────────────────────────────
-  // The `cron` package interprets the pattern's fields directly in `timeZone`
-  // when one is given — NOT in UTC. So these are plain IST clock times.
+  // Registered dynamically in reloadSchedule() (see onModuleInit above),
+  // not via @Cron decorators — schedule times are admin-tunable through
+  // PromoScheduleConfigService and take effect without a restart.
+  // The `cron` package interprets the pattern's fields directly in the IST
+  // timeZone passed to registerJob() — NOT in UTC.
 
-  // 7:00 AM IST
-  @Cron('0 7 * * *', { name: 'morning_notif', timeZone: 'Asia/Kolkata' })
   async sendMorningNotification() {
     if (!isPrimaryInstance()) return;
     await this.broadcast('morning', 'Morning');
   }
 
-  // 12:30 PM IST
-  @Cron('30 12 * * *', { name: 'lunch_notif', timeZone: 'Asia/Kolkata' })
   async sendLunchNotification() {
     if (!isPrimaryInstance()) return;
     await this.broadcast('lunch', 'Lunch');
   }
 
-  // 6:00 PM IST
-  @Cron('0 18 * * *', { name: 'evening_notif', timeZone: 'Asia/Kolkata' })
   async sendEveningNotification() {
     if (!isPrimaryInstance()) return;
     await this.broadcast('evening', 'Evening');
   }
 
-  // 9:00 PM IST
-  @Cron('0 21 * * *', { name: 'dinner_notif', timeZone: 'Asia/Kolkata' })
   async sendDinnerNotification() {
     if (!isPrimaryInstance()) return;
     await this.broadcast('dinner', 'Dinner');
   }
 
-  // 11:00 PM IST, every day
-  @Cron('0 23 * * *', { name: 'goodnight_notif', timeZone: 'Asia/Kolkata' })
   async sendGoodNightNotification() {
     if (!isPrimaryInstance()) return;
     await this.broadcast('goodnight', 'Good Night');
   }
 
-  // Saturday & Sunday 10:00 AM IST
-  @Cron('0 10 * * 6,0', { name: 'weekend_notif', timeZone: 'Asia/Kolkata' })
   async sendWeekendNotification() {
     if (!isPrimaryInstance()) return;
     await this.broadcast('weekend', 'Weekend');
   }
 
-  // Re-engagement: every Tuesday 11:00 AM IST — target users not seen in 3+ days
-  @Cron('0 11 * * 2', { name: 'reengage_notif', timeZone: 'Asia/Kolkata' })
+  // Re-engagement: target users not seen in 3+ days
   async sendReengagementNotification() {
     if (!isPrimaryInstance()) return;
     const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);

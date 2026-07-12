@@ -9,6 +9,7 @@ import { Offer } from '../entities/offer.entity';
 import { Vendor } from '../entities/vendor.entity';
 import { MonitoringService } from '../monitoring/monitoring.service';
 import { isPrimaryInstance } from '../common/utils/cron-guard';
+import { CreateGroupDealDto } from './dto/create-group-deal.dto';
 
 @Injectable()
 export class GroupDealsService {
@@ -23,9 +24,7 @@ export class GroupDealsService {
     private readonly monitoring: MonitoringService,
   ) {}
 
-  async create(userId: number, userRole: string, dto: {
-    offer_id: number; min_members: number; max_members?: number; duration_hours?: number;
-  }) {
+  async create(userId: number, userRole: string, dto: CreateGroupDealDto) {
     if (userRole === 'admin') {
       const offer = await this.offerRepo.findOne({ where: { id: dto.offer_id }, select: ['id'] });
       if (!offer) throw new NotFoundException('Offer not found');
@@ -34,6 +33,14 @@ export class GroupDealsService {
       if (!vendor) throw new ForbiddenException('Vendor profile not found');
       const offer = await this.offerRepo.findOne({ where: { id: dto.offer_id, vendor_id: vendor.id }, select: ['id'] });
       if (!offer) throw new NotFoundException('Offer not found or does not belong to your vendor profile');
+    }
+
+    // Nothing enforced max_members >= min_members — a deal created with e.g.
+    // min_members=10, max_members=5 fills up (join() caps at max_members)
+    // and can never reach FULFILLED, silently stranding every member who
+    // committed until the hourly expiry cron marks it EXPIRED.
+    if (dto.max_members != null && dto.max_members < dto.min_members) {
+      throw new BadRequestException('max_members must be greater than or equal to min_members');
     }
 
     const hours = dto.duration_hours ?? 24;

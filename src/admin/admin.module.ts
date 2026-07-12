@@ -22,6 +22,8 @@ import { Category } from '../entities/category.entity';
 import { MailModule } from '../mail/mail.module';
 import { FraudModule } from '../fraud/fraud.module';
 import { OffersModule } from '../offers/offers.module';
+import { FeedModule } from '../feed/feed.module';
+import { CashfreeModule } from '../cashfree/cashfree.module';
 
 @Module({
   imports: [
@@ -33,6 +35,8 @@ import { OffersModule } from '../offers/offers.module';
     MailModule,
     FraudModule,
     OffersModule,
+    FeedModule,
+    CashfreeModule,
   ],
   controllers: [AdminController],
   providers: [AdminService, PushService],

@@ -80,6 +80,17 @@ export class User {
   @Column({ type: 'boolean', default: true })
   email_alerts: boolean;
 
+  // Mobile's Settings screen had a "Push Notifications" switch that was pure
+  // local widget state — no persistence, no server-side enforcement at all;
+  // toggling it off did nothing. This is the real column it now controls.
+  @Column({ type: 'boolean', default: true })
+  push_enabled: boolean;
+
+  // No leaderboard moderation existed at all — an admin couldn't exclude a
+  // user gaming the ranking without a direct database edit.
+  @Column({ type: 'boolean', default: false })
+  excluded_from_leaderboard: boolean;
+
   // Sub-tier within role='admin' only (support | moderator | super). Null for
   // non-admins. Checked live from the DB on every request (see jwt.strategy.ts)
   // rather than baked into the JWT, so a demotion takes effect immediately.

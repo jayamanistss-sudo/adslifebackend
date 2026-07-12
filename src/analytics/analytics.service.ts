@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 import { Offer } from '../entities/offer.entity';
 import { VendorDailyStat } from '../entities/vendor-daily-stat.entity';
 import { UserInteraction } from '../entities/user-interaction.entity';
+import { VendorFollower } from '../entities/vendor-follower.entity';
 
 @Injectable()
 export class AnalyticsService {
@@ -11,6 +12,7 @@ export class AnalyticsService {
     @InjectRepository(Offer) private readonly offerRepo: Repository<Offer>,
     @InjectRepository(VendorDailyStat) private readonly dailyStatRepo: Repository<VendorDailyStat>,
     @InjectRepository(UserInteraction) private readonly interactionRepo: Repository<UserInteraction>,
+    @InjectRepository(VendorFollower) private readonly followerRepo: Repository<VendorFollower>,
   ) {}
 
   async roi(offerId: number, days = 30, vendorId?: number, role?: string) {
@@ -67,7 +69,7 @@ export class AnalyticsService {
   }
 
   async audience(vendorId: number, _days = 30) {
-    const [summary, cityRows, hourRows] = await Promise.all([
+    const [summary, cityRows, hourRows, followersCount] = await Promise.all([
       this.interactionRepo
         .createQueryBuilder('ui')
         .innerJoin(Offer, 'o', 'o.id = ui.offer_id')
@@ -98,6 +100,11 @@ export class AnalyticsService {
         .where('o.vendor_id = :vid', { vid: vendorId })
         .groupBy('EXTRACT(HOUR FROM ui.created_at)')
         .getRawMany(),
+
+      // vendors.total_followers is a denormalized cache that can drift from
+      // reality (e.g. seed data inserted directly into vendor_followers) —
+      // count the join table live instead of trusting the cached column.
+      this.followerRepo.count({ where: { vendor_id: vendorId } }),
     ]);
 
     const imp = +summary?.total_impressions || 0;
@@ -110,7 +117,10 @@ export class AnalyticsService {
     for (const r of hourRows) peakHours[+r.hr] = +r.count;
 
     return {
-      device_breakdown: { mobile: 70, desktop: 25, tablet: 5 },
+      // No real device/platform signal is tracked anywhere in the schema —
+      // this used to be a hardcoded {mobile:70,desktop:25,tablet:5} that
+      // never reflected reality. Omitted rather than faked; add real
+      // instrumentation (e.g. User-Agent on interactions) before reviving it.
       peak_hours: peakHours,
       top_cities: cityRows,
       engagement_rate: engagementRate,
@@ -118,6 +128,8 @@ export class AnalyticsService {
       total_clicks: clk,
       total_saves: sv,
       total_redemptions: rdm,
+      followers_count: followersCount,
+      vendor_id: vendorId,
     };
   }
 

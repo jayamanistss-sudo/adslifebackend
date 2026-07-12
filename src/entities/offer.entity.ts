@@ -79,6 +79,18 @@ export class Offer {
   @Column({ type: 'boolean', default: false })
   is_featured: boolean;
 
+  // is_featured was a flat boolean with no scheduling window or ordering —
+  // no dedicated curation tool existed, just a star icon buried in the
+  // all-offers grid. Null start/end = featured indefinitely once flagged.
+  @Column({ type: 'timestamp', nullable: true })
+  featured_start_at: Date | null;
+
+  @Column({ type: 'timestamp', nullable: true })
+  featured_until: Date | null;
+
+  @Column({ type: 'int', nullable: true, default: 0 })
+  featured_order: number | null;
+
   @Column({ type: 'timestamp', nullable: true })
   valid_from: Date | null;
 

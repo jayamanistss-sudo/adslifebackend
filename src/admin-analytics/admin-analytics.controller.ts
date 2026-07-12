@@ -30,4 +30,16 @@ export class AdminAnalyticsController {
     const data = await this.service.geography(limit ? +limit : 10);
     return { success: true, data };
   }
+
+  @Get('categories')
+  async categoryPerformance(@Query('limit') limit?: string) {
+    const data = await this.service.categoryPerformance(limit ? +limit : 20);
+    return { success: true, data };
+  }
+
+  @Get('campaigns')
+  async campaignAnalytics(@Query('days') days?: string) {
+    const data = await this.service.campaignAnalytics(days ? +days : 30);
+    return { success: true, data };
+  }
 }

@@ -7,6 +7,7 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { VendorApplication } from '../entities/vendor-application.entity';
 import { User, UserRole } from '../entities/user.entity';
 import { PushService } from '../services/push.service';
+import { ReferralService } from '../referral/referral.service';
 import { SubmitVendorApplicationDto } from './dto/vendor-apply.dto';
 
 @ApiTags('vendor-apply')
@@ -18,6 +19,7 @@ export class VendorApplyController {
     @InjectRepository(VendorApplication) private readonly applicationRepo: Repository<VendorApplication>,
     @InjectRepository(User) private readonly userRepo: Repository<User>,
     private readonly push: PushService,
+    private readonly referral: ReferralService,
   ) {}
 
   @Get('status')
@@ -34,6 +36,7 @@ export class VendorApplyController {
         status: latest.status,
         business_name: latest.business_name,
         created_at: latest.created_at,
+        admin_note: latest.admin_note,
       },
     };
   }
@@ -62,8 +65,16 @@ export class VendorApplyController {
       lng: dto.lng ?? null,
       logo_url: dto.logo_url ?? null,
       plan_id: dto.plan_id ?? null,
+      order_id: dto.order_id ?? null,
       status: 'pending',
     });
+
+    // Non-blocking — a bad/reused/self code shouldn't fail the application
+    // submission itself, it just means no coins get credited this time.
+    // applyReferral() already no-ops silently on any of those cases.
+    if (dto.referral_code) {
+      await this.referral.applyReferral(user.user_id, dto.referral_code.toUpperCase()).catch(() => {});
+    }
 
     const admins = await this.userRepo.find({ where: { role: UserRole.ADMIN }, select: ['id'] });
     if (admins.length) {

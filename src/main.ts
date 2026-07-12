@@ -14,7 +14,7 @@ async function bootstrap() {
   // Parse cookies — required for httpOnly JWT cookie auth on web clients
   app.use(cookieParser());
 
-  // Capture raw body for Razorpay webhook HMAC verification BEFORE json parsing
+  // Capture raw body for Cashfree webhook HMAC verification BEFORE json parsing
   app.use('/api/payment/webhook', express.raw({ type: 'application/json' }));
 
   // Security headers. Strict CSP everywhere by default; the relaxed policy
@@ -95,6 +95,18 @@ async function bootstrap() {
       transform: true,
     }),
   );
+
+  // Every route lives under /api today — the deployed mobile app and web
+  // frontend both hardcode that prefix, so it stays the canonical path.
+  // /api/v1/* is added as an alias resolving to the same routes, so new
+  // integrations can start on a versioned path now while it's cheap,
+  // without a breaking change for what's already live.
+  app.use((req: any, _res: any, next: any) => {
+    if (req.url === '/api/v1' || req.url.startsWith('/api/v1/')) {
+      req.url = '/api' + req.url.slice('/api/v1'.length);
+    }
+    next();
+  });
 
   app.setGlobalPrefix('api');
 
