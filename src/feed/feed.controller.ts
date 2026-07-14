@@ -70,7 +70,12 @@ export class FeedController {
     @Query('radius', new DefaultValuePipe(10), ParseFloatPipe) radius: number,
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
   ) {
-    const data = await this.feedService.nearby(lat, lng, radius, page);
+    // NearbyQueryDto declares @Min(0.1)/@Max(100) for radius, but discrete
+    // @Query() params bypass class-validator — clamp here so it's actually
+    // enforced instead of a caller being able to disable the radius filter
+    // entirely with radius=0 or radius=999999.
+    const clampedRadius = Math.min(100, Math.max(0.1, radius));
+    const data = await this.feedService.nearby(lat, lng, clampedRadius, page);
     return { success: true, data };
   }
 

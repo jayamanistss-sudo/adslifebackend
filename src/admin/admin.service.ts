@@ -221,6 +221,10 @@ export class AdminService {
     // error — captured here so the approval notification can nudge them
     // toward finishing the upgrade instead of silently landing on Starter.
     let unpaidPlanName: string | null = null;
+    // First-time vendors landing on Starter (no plan paid for at signup) get
+    // a 14-day Pro trial as a welcome perk — gated on `!existing` so a
+    // suspend→reapprove cycle can't be used to keep re-rolling free trials.
+    let trialGranted = false;
     await this.dataSource.transaction(async (manager) => {
       await manager.getRepository(VendorApplication).update(appId, {
         status, updated_at: new Date(),
@@ -288,6 +292,8 @@ export class AdminService {
             },
           );
         } else {
+          trialGranted = planSlug === 'starter';
+          const trialExpiresAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
           const saved = await manager.getRepository(Vendor).save({
             user_id: app.user_id, business_name: app.business_name, category: app.category,
             city: app.city, address: app.address, phone: app.phone, website: app.website,
@@ -295,8 +301,10 @@ export class AdminService {
             logo_url: app.logo_url ?? null,
             lat: app.lat ?? null, lng: app.lng ?? null,
             status: VendorStatus.APPROVED, review_note: note || null,
-            subscription_plan: planSlug,
-            ...(planExpiresAt ? { plan_expires_at: planExpiresAt } : {}),
+            subscription_plan: trialGranted ? 'pro' : planSlug,
+            ...(trialGranted
+              ? { plan_expires_at: trialExpiresAt }
+              : planExpiresAt ? { plan_expires_at: planExpiresAt } : {}),
           });
           vendorId = saved.id;
         }
@@ -333,6 +341,17 @@ export class AdminService {
       );
       if (user?.email && await this.notificationSettings.isEnabled('vendor_approved', 'email')) {
         await this.mail.sendVendorApprovedEmail(user.email, user.name, app.business_name);
+      }
+      if (trialGranted) {
+        // Separate notification (not folded into the approval one above) so
+        // the mobile dashboard can key its congratulations animation off a
+        // distinct, dismissible notification type instead of a fragile
+        // client-side heuristic — see vendor_dashboard_screen.dart.
+        await this.push.send(
+          app.user_id, '🎉 14 days of Pro, on us!',
+          'Your new vendor account comes with a free 14-day trial of Pro — unlimited offers, full analytics, and more. Enjoy!',
+          { type: 'vendor_trial_started', route: '/vendor/dashboard' },
+        );
       }
     } else {
       // A paid application that gets rejected used to just sit there —

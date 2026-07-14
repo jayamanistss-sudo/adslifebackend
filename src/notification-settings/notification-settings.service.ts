@@ -30,6 +30,7 @@ const SEED: SeedRow[] = [
   { activity_type: 'expiry_reminder',       category: 'Scheduled / Marketing', label: 'Saved offer expiring soon',  email_enabled: false },
   { activity_type: 'vendor_application_new', category: 'Vendor lifecycle',    label: 'New vendor application (to admins)', email_enabled: false },
   { activity_type: 'vendor_approved',       category: 'Vendor lifecycle',      label: 'Vendor application approved', email_enabled: true },
+  { activity_type: 'vendor_trial_started',  category: 'Vendor lifecycle',      label: 'Free Pro trial granted (new vendor)', email_enabled: false },
   { activity_type: 'vendor_rejected',       category: 'Vendor lifecycle',      label: 'Vendor application rejected', email_enabled: true },
   { activity_type: 'vendor_suspended',      category: 'Vendor lifecycle',      label: 'Vendor account suspended',    email_enabled: true },
   { activity_type: 'plan_activated',        category: 'Vendor lifecycle',      label: 'Subscription plan activated', email_enabled: false },

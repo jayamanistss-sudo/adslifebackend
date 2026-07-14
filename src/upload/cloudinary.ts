@@ -1,9 +1,4 @@
 import { v2 as cloudinary } from 'cloudinary';
-
-// Configured lazily on first call, not at module-import time: ConfigModule's
-// dotenv loading happens inside AppModule's decorator, which runs AFTER this
-// module's imports are resolved — process.env.CLOUDINARY_* isn't set yet
-// if we config() at the top level.
 let configured = false;
 function ensureConfigured() {
   if (configured) return;

@@ -113,7 +113,7 @@ export class FeedService {
 
     // lat/lng are ParseFloatPipe-validated numbers, but bind them as query
     // parameters anyway so this expression can never become an injection point.
-    const distExpr = lat && lng
+    const distExpr = Number.isFinite(lat) && Number.isFinite(lng)
       ? `(6371 * ACOS(GREATEST(-1, LEAST(1,
            COS(RADIANS(:ulat)) * COS(RADIANS(v.lat)) *
            COS(RADIANS(v.lng) - RADIANS(:ulng)) +
@@ -121,7 +121,7 @@ export class FeedService {
          ))))`
       : 'NULL';
 
-    const distScore = lat && lng
+    const distScore = Number.isFinite(lat) && Number.isFinite(lng)
       ? `CASE
            WHEN v.lat IS NULL OR v.lng IS NULL THEN ${w.distance_no_location}
            WHEN ${distExpr} <= 1  THEN ${w.distance_tier1}
@@ -215,7 +215,7 @@ export class FeedService {
       qb.orderBy('o.discount_percent', 'DESC', 'NULLS LAST').addOrderBy('o.created_at', 'DESC');
     } else if (sort === 'views') {
       qb.orderBy('o.views', 'DESC', 'NULLS LAST').addOrderBy('o.created_at', 'DESC');
-    } else if (lat && lng) {
+    } else if (Number.isFinite(lat) && Number.isFinite(lng)) {
       // Nearest offers first when we know where the user is; vendors without
       // coordinates go last. Score/recency break ties at the same distance.
       qb.orderBy(distExpr, 'ASC', 'NULLS LAST')
@@ -251,7 +251,7 @@ export class FeedService {
     const w = await this.feedConfig.getWeights();
 
     // Bound as :ulat/:ulng (not interpolated) — see personalized() note.
-    const distExpr = lat && lng
+    const distExpr = Number.isFinite(lat) && Number.isFinite(lng)
       ? `ROUND((6371 * ACOS(GREATEST(-1, LEAST(1,
            COS(RADIANS(:ulat)) * COS(RADIANS(v.lat)) *
            COS(RADIANS(v.lng) - RADIANS(:ulng)) +
@@ -304,7 +304,10 @@ export class FeedService {
     this.applyFeedFilters(countQb, { category, distanceKm, filter, distExpr }, w);
 
     const countRow = await countQb.getRawOne();
-    const total = countRow?.total ?? 0;
+    // Postgres COUNT(*) comes back as a string via getRawOne() — coerce like
+    // personalized() does, or clients doing arithmetic on `total` (paging,
+    // `total > 0` checks) get string concatenation instead of addition.
+    const total = +(countRow?.total ?? 0);
 
     if (sort === 'discount') {
       qb.orderBy('o.discount_percent', 'DESC', 'NULLS LAST').addOrderBy('o.created_at', 'DESC');
