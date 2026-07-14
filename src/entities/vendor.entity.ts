@@ -53,6 +53,10 @@ export class Vendor {
   @Column({ type: 'varchar', length: 50, nullable: true })
   gst_number: string | null;
 
+  // Keyed mon..sun; each day is {open: "HH:mm", close: "HH:mm", closed: bool}.
+  @Column({ type: 'simple-json', nullable: true })
+  hours: Record<string, { open: string; close: string; closed: boolean }> | null;
+
   @Column({ type: 'text', nullable: true })
   logo_url: string | null;
 

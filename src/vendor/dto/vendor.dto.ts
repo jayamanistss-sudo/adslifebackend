@@ -1,6 +1,6 @@
 import {
   IsString, IsOptional, IsNumber, IsUrl, IsLatitude, IsLongitude,
-  MaxLength, MinLength, Matches,
+  MaxLength, MinLength, Matches, IsObject,
 } from 'class-validator';
 import { Type, Transform } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
@@ -72,6 +72,13 @@ export class UpdateVendorProfileDto {
   @IsString()
   @MaxLength(20)
   gst_number?: string;
+
+  @ApiPropertyOptional({
+    example: { mon: { open: '09:00', close: '21:00', closed: false } },
+  })
+  @IsOptional()
+  @IsObject()
+  hours?: Record<string, { open: string; close: string; closed: boolean }>;
 }
 
 export class VendorDashboardQueryDto {

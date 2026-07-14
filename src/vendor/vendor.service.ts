@@ -18,6 +18,18 @@ function pctChange(cur: number, prev: number): string {
   return (change >= 0 ? '+' : '') + change + '%';
 }
 
+// getMyProfile/getProfile read via raw createQueryBuilder().getRawOne(), which
+// bypasses TypeORM's simple-json auto-parse transformer (that only runs on
+// entity-hydrated reads) — the `hours` column comes back as a raw JSON string.
+function parseVendorHours(raw: unknown): Record<string, { open: string; close: string; closed: boolean }> | null {
+  if (!raw || typeof raw !== 'string') return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
 @Injectable()
 export class VendorService {
   constructor(
@@ -215,7 +227,7 @@ export class VendorService {
       .where('v.user_id = :userId', { userId })
       .getRawOne();
     if (!vendor) throw new NotFoundException('Vendor not found');
-    return vendor;
+    return { ...vendor, hours: parseVendorHours(vendor.hours) };
   }
 
   async getProfile(vendorId: number) {
@@ -226,6 +238,7 @@ export class VendorService {
       .where('v.id = :vendorId', { vendorId })
       .getRawOne();
     if (!vendor) throw new NotFoundException('Vendor not found');
+    vendor.hours = parseVendorHours(vendor.hours);
 
     // Public vendor page needs the full picture in one call
     const [followersCount, offers, badgeTier, ratingRow] = await Promise.all([
@@ -255,7 +268,7 @@ export class VendorService {
     const vendor = await this.vendorRepo.findOne({ where: { user_id: userId }, select: ['id'] });
     if (!vendor) throw new NotFoundException('Vendor not found');
 
-    const allowed = ['business_name', 'category', 'city', 'address', 'phone', 'website', 'description', 'logo_url', 'lat', 'lng', 'gst_number'];
+    const allowed = ['business_name', 'category', 'city', 'address', 'phone', 'website', 'description', 'logo_url', 'lat', 'lng', 'gst_number', 'hours'];
     const updateData: Partial<Vendor> = {};
     for (const key of allowed) {
       if (dto[key] !== undefined) (updateData as any)[key] = dto[key];
